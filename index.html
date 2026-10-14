@@ -1596,7 +1596,25 @@ function pdfFooter(doc) {
 
 // Scarica il PDF. Su iPhone/iPad, se il download diretto non parte, lo apre in una scheda
 // da cui si può salvare con "Condividi → Salva su File".
+function isAppleMobile() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function pdfDownload(doc, filename) {
+  // iPhone/iPad: apre il menu Condividi → "Salva su File" (funziona in Safari, Opera, Chrome...)
+  if (isAppleMobile() && navigator.canShare) {
+    try {
+      const file = new File([doc.output('blob')], filename, { type: 'application/pdf' });
+      if (navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: filename }).catch(err => {
+          if (err && err.name === 'AbortError') return; // l'utente ha chiuso il menu
+          doc.save(filename);
+        });
+        return;
+      }
+    } catch (e) { /* passa al download normale */ }
+  }
   try {
     doc.save(filename);
   } catch (e) {
@@ -1618,7 +1636,7 @@ function generatePDF() {
     alert('Non ci sono camerieri assegnati a questa partita.');
     return;
   }
-  if (ze.length) {
+  if (ze.length && !isAppleMobile()) {
     if (!confirm('Zone senza camerieri:\n\n' + ze.join('\n') + '\n\nProcedere comunque?')) return;
   }
 
@@ -1657,7 +1675,7 @@ function generateEventPDF() {
     return;
   }
   const slotsWithoutStaff = slots.filter(s => !staff.some(st => st.slotId === s.id));
-  if (slotsWithoutStaff.length > 0) {
+  if (slotsWithoutStaff.length > 0 && !isAppleMobile()) {
     const names = slotsWithoutStaff.map(s => s.ora + (s.label ? ' (' + s.label + ')' : '')).join('\n');
     if (!confirm('Fasce senza camerieri:\n\n' + names + '\n\nProcedere comunque?')) return;
   }
