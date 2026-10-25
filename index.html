@@ -367,11 +367,13 @@
         <input type="file" id="backup-file" accept=".xlsx,.xls" style="display:none" onchange="handleBackupFile(this)" />
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-secondary" onclick="triggerBackupImport('merge')">Unisci ai dati esistenti</button>
-          <button class="btn-secondary btn-danger" onclick="triggerBackupImport('replace')">Sostituisci tutto</button>
+          <button class="btn-secondary btn-danger" onclick="triggerBackupImport('replace')">Sostituisci</button>
+          <button class="btn-secondary" id="undo-restore-btn" onclick="undoLastRestore()" style="display:none">↩ Annulla ultimo ripristino</button>
         </div>
         <div style="font-size:11px;color:#aaa;margin-top:10px;line-height:1.5">
           <strong>Unisci:</strong> aggiunge solo le cose che non hai già.<br>
-          <strong>Sostituisci:</strong> cancella tutti i dati attuali e li rimpiazza.
+          <strong>Sostituisci:</strong> rimpiazza solo le categorie contenute nel file; le altre restano come sono.<br>
+          Prima di importare vedi cosa contiene il file, e viene salvata una copia per poter annullare (per 3 giorni).
         </div>
       </div>
     </div>
@@ -2658,10 +2660,28 @@ const FIELD_ALIASES = {
 const IMPORT_FIELDS = ['matricola', 'cognome', 'nome', 'sesso', 'ddn', 'citta', 'provincia', 'stato', 'email', 'tel'];
 const TRASH_DAYS = 15;
 
-let employees = JSON.parse(localStorage.getItem('lb_employees') || '[]');
-let matches   = JSON.parse(localStorage.getItem('lb_matches')   || '[]');
-let events    = JSON.parse(localStorage.getItem('lb_events')    || '[]');
-let trash     = JSON.parse(localStorage.getItem('lb_trash')     || '[]');
+// Lettura sicura: se un dato salvato è rovinato l'app si apre lo stesso,
+// e il valore originale viene conservato in lb_corrupt_<chiave> per poterlo recuperare.
+const lbCorruptKeys = [];
+function lbLoad(key, fallback, check) {
+  let raw = null;
+  try { raw = localStorage.getItem(key); } catch (e) { return fallback; }
+  if (raw === null || raw === '') return fallback;
+  try {
+    const val = JSON.parse(raw);
+    if (val === null || (check && !check(val))) throw new Error('formato non valido');
+    return val;
+  } catch (e) {
+    try { localStorage.setItem('lb_corrupt_' + key + '_' + Date.now(), raw); } catch (_) {}
+    lbCorruptKeys.push(key);
+    return fallback;
+  }
+}
+const lbIsArray = v => Array.isArray(v);
+let employees = lbLoad('lb_employees', [], lbIsArray);
+let matches   = lbLoad('lb_matches',   [], lbIsArray);
+let events    = lbLoad('lb_events',    [], lbIsArray);
+let trash     = lbLoad('lb_trash',     [], lbIsArray);
 let currentMatchId = null;
 let currentEventId = null;
 let editEmpId      = null;
@@ -2671,7 +2691,7 @@ let ssSelectedId = null;
 let ssHighlight = 0;
 let ssFiltered  = [];
 const COOK_ZONES = ZONES.filter(z => z !== 'Ground Box'); // ai Ground Box non ci sono cuochi
-let calls = JSON.parse(localStorage.getItem('lb_calls') || 'null') || { periodStart: null, manual: [], archive: [] };
+let calls = lbLoad('lb_calls', null, v => typeof v === 'object' && !Array.isArray(v)) || { periodStart: null, manual: [], archive: [] };
 if (!calls.manual) calls.manual = [];
 if (!calls.archive) calls.archive = [];
 let boardTab = 'camerieri';
@@ -2685,12 +2705,26 @@ function empName(empId) {
 }
 function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
+let lbSaveErrorShownAt = 0;
 function saveAll() {
-  localStorage.setItem('lb_employees', JSON.stringify(employees));
-  localStorage.setItem('lb_matches',   JSON.stringify(matches));
-  localStorage.setItem('lb_events',    JSON.stringify(events));
-  localStorage.setItem('lb_trash',     JSON.stringify(trash));
-  localStorage.setItem('lb_calls',     JSON.stringify(calls));
+  try {
+    localStorage.setItem('lb_employees', JSON.stringify(employees));
+    localStorage.setItem('lb_matches',   JSON.stringify(matches));
+    localStorage.setItem('lb_events',    JSON.stringify(events));
+    localStorage.setItem('lb_trash',     JSON.stringify(trash));
+    localStorage.setItem('lb_calls',     JSON.stringify(calls));
+    return true;
+  } catch (e) {
+    // Memoria piena o salvataggio bloccato: avvisa (al massimo una volta ogni 30 secondi)
+    if (Date.now() - lbSaveErrorShownAt > 30000) {
+      lbSaveErrorShownAt = Date.now();
+      alert('⚠️ ATTENZIONE: le ultime modifiche NON sono state salvate.\n\n' +
+        'La memoria dell\'app è piena o il salvataggio è bloccato.\n' +
+        'Fai subito un backup completo (⚙ Impostazioni → Backup e ripristino), poi svuota il cestino ' +
+        'o elimina partite/eventi vecchi che non ti servono più.');
+    }
+    return false;
+  }
 }
 
 function cleanupTrash() {
@@ -3981,6 +4015,12 @@ function exportBackup() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(empSheet.length ? empSheet : [{}]), 'Dipendenti');
     totalSheets++;
     parts.push(`${employees.length} dipendenti`);
+    // Definizioni dei campi personalizzati (senza queste, su un altro dispositivo i valori extra non si vedono)
+    const cfJson = JSON.stringify(customFields || []);
+    const cfChunks = [];
+    for (let i = 0; i < cfJson.length; i += 30000) cfChunks.push({ Parte: cfChunks.length + 1, 'Dati (JSON)': cfJson.slice(i, i + 30000) });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cfChunks), 'Campi personalizzati');
+    totalSheets++;
   }
 
   if (incPart) {
@@ -4116,17 +4156,61 @@ function exportBackup() {
   const now = new Date();
   const pad = n => String(n).padStart(2,'0');
   const filename = `LoveBanqueting_${tags.join('-')}_${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
-  XLSX.writeFile(wb, filename);
+  // Su iPhone/iPad (app aperta dalla Home) il download diretto può non partire:
+  // si usa lo stesso sistema di condivisione dei PDF, con ripiego sul download normale.
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  shareOrDownload(blob, filename);
 }
 
 function triggerBackupImport(mode) {
   backupImportMode = mode;
-  if (mode === 'replace') {
-    if (!confirm('Attenzione: SOSTITUIRE tutti i dati attuali con quelli del backup?\n\nTutti i dipendenti e le partite attuali verranno CANCELLATI.\n\nConsigliato: fai prima un backup dei dati attuali.')) return;
-  }
+  // La conferma arriva DOPO aver letto il file, con l'anteprima di cosa contiene
   document.getElementById('backup-file').value = '';
   document.getElementById('backup-file').click();
 }
+
+// ── Annulla ultimo ripristino ─────────────────────────────────────────────
+const PRE_RESTORE_DAYS = 3;
+let lbPreRestoreMem = null; // copia in memoria, se sul dispositivo non c'era spazio
+function getPreRestoreSnapshot() {
+  let raw = lbPreRestoreMem;
+  if (!raw) { try { raw = localStorage.getItem('lb_pre_restore'); } catch (e) { raw = null; } }
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) { return null; }
+}
+function updateUndoRestoreButton() {
+  const btn = document.getElementById('undo-restore-btn');
+  if (!btn) return;
+  const s = getPreRestoreSnapshot();
+  btn.style.display = s ? '' : 'none';
+  if (s) btn.title = 'Torna ai dati che avevi prima del ripristino del ' + new Date(s.at).toLocaleString('it-IT');
+}
+function undoLastRestore() {
+  const s = getPreRestoreSnapshot();
+  if (!s) { alert('Non c\'è nessun ripristino da annullare.'); updateUndoRestoreButton(); return; }
+  if (!confirm('Tornare ai dati che avevi prima del ripristino del ' + new Date(s.at).toLocaleString('it-IT') + '?\n\n' +
+    'Le modifiche fatte dopo quel ripristino andranno perse.')) return;
+  employees = Array.isArray(s.employees) ? s.employees : [];
+  matches   = Array.isArray(s.matches)   ? s.matches   : [];
+  events    = Array.isArray(s.events)    ? s.events    : [];
+  trash     = Array.isArray(s.trash)     ? s.trash     : [];
+  calls     = Object.assign({ periodStart: null, manual: [], archive: [] }, s.calls || {});
+  if (Array.isArray(s.customFields)) { customFields = s.customFields; saveCustomFields(); }
+  if (!saveAll()) return;
+  try { localStorage.removeItem('lb_pre_restore'); } catch (e) {}
+  lbPreRestoreMem = null;
+  updateUndoRestoreButton();
+  renderMatches(); renderEvents(); renderDipendenti();
+  alert('Fatto: sono tornati i dati di prima del ripristino.');
+}
+// La copia di sicurezza occupa spazio: dopo qualche giorno viene eliminata
+(function cleanupPreRestore() {
+  const s = getPreRestoreSnapshot();
+  if (s && (Date.now() - (s.at || 0)) > PRE_RESTORE_DAYS * 24 * 60 * 60 * 1000) {
+    try { localStorage.removeItem('lb_pre_restore'); } catch (e) {}
+  }
+})();
 
 function handleBackupFile(input) {
   const file = input.files[0];
@@ -4152,8 +4236,28 @@ function handleBackupFile(input) {
         try { parsedCalls = JSON.parse(callsRows.sort((a, b) => a.Parte - b.Parte).map(r => r['Dati (JSON)']).join('')); } catch (e) { parsedCalls = null; }
       }
 
-      if (!empRows.length && !matchRows.length && !eventRows.length && !parsedCalls) {
-        alert('Il file non sembra essere un backup valido.');
+      // Quali categorie contiene davvero il file (conta il foglio, anche se vuoto)
+      const has = name => !!wb.Sheets[name];
+      const present = {
+        dip:    has('Dipendenti'),
+        part:   has('Partite'),
+        ev:     has('Eventi'),
+        trash:  has('Cestino'),
+        calls:  has('Chiamate') && !!parsedCalls,
+        fields: has('Campi personalizzati')
+      };
+      let parsedFields = null;
+      if (present.fields) {
+        try {
+          const cfRows = getSheet('Campi personalizzati');
+          parsedFields = cfRows.length ? JSON.parse(cfRows.sort((a, b) => a.Parte - b.Parte).map(r => r['Dati (JSON)']).join('')) : [];
+          if (!Array.isArray(parsedFields)) parsedFields = null;
+        } catch (e) { parsedFields = null; }
+        if (!parsedFields) present.fields = false;
+      }
+
+      if (!present.dip && !present.part && !present.ev && !present.trash && !present.calls) {
+        alert('Il file non sembra essere un backup di Love Banqueting.\n\nNessun dato è stato modificato.');
         return;
       }
 
@@ -4268,14 +4372,53 @@ function handleBackupFile(input) {
         })
         .filter(Boolean);
 
-      // Applica import
-      if (backupImportMode === 'replace') {
-        employees = parsedEmps;
-        matches   = parsedMatches;
-        events    = parsedEvents;
-        trash     = parsedTrash;
-        if (parsedCalls) calls = Object.assign({ periodStart: null, manual: [], archive: [] }, parsedCalls);
+      // ── Anteprima e conferma ────────────────────────────────────────────
+      const isReplace = backupImportMode === 'replace';
+      const lines = [];
+      if (present.dip)   lines.push(`• ${plural(parsedEmps.length, 'dipendente', 'dipendenti')}`);
+      if (present.part)  lines.push(`• ${plural(parsedMatches.length, 'partita', 'partite')}`);
+      if (present.ev)    lines.push(`• ${plural(parsedEvents.length, 'evento', 'eventi')}`);
+      if (present.trash) lines.push(`• ${parsedTrash.length} nel cestino`);
+      if (present.calls) lines.push(`• chiamate (${(parsedCalls.archive || []).length} file archiviati)`);
+      if (present.fields) lines.push(`• ${plural(parsedFields.length, 'campo personalizzato', 'campi personalizzati')}`);
+      const kept = [];
+      if (!present.dip)   kept.push('dipendenti');
+      if (!present.part)  kept.push('partite');
+      if (!present.ev)    kept.push('eventi');
+      if (!present.trash) kept.push('cestino');
+      if (!present.calls) kept.push('chiamate');
+      let msg = `Il file contiene:\n${lines.join('\n')}\n\n`;
+      if (isReplace) {
+        msg += 'SOSTITUISCI: queste categorie prenderanno il posto di quelle attuali.';
+        if (kept.length) msg += `\nNon presenti nel file, restano come sono: ${kept.join(', ')}.`;
       } else {
+        msg += 'UNISCI: verranno aggiunte solo le cose che non hai già.';
+      }
+      msg += '\n\nPrima di procedere viene salvata una copia dei dati attuali, così puoi annullare.\n\nConfermi?';
+      if (!confirm(msg)) return;
+
+      // ── Copia di sicurezza dei dati attuali (per "Annulla ultimo ripristino") ──
+      const snapshot = JSON.stringify({ at: Date.now(), employees, matches, events, trash, calls, customFields });
+      let snapshotOk = true;
+      try { localStorage.setItem('lb_pre_restore', snapshot); } catch (e) { snapshotOk = false; }
+      lbPreRestoreMem = snapshot;
+      if (!snapshotOk && !confirm('⚠️ Non c\'è spazio per salvare la copia di sicurezza sul dispositivo.\n\nPotrai annullare solo finché non chiudi l\'app. Consigliato: annulla e fai prima un backup completo.\n\nProcedere comunque?')) return;
+
+      // Applica import
+      if (isReplace) {
+        // Sostituisce SOLO le categorie presenti nel file: le altre restano intatte
+        if (present.dip)    employees = parsedEmps;
+        if (present.part)   matches   = parsedMatches;
+        if (present.ev)     events    = parsedEvents;
+        if (present.trash)  trash     = parsedTrash;
+        if (present.calls)  calls = Object.assign({ periodStart: null, manual: [], archive: [] }, parsedCalls);
+        if (present.fields) { customFields = parsedFields; saveCustomFields(); }
+      } else {
+        if (present.fields) {
+          const fIds = new Set(customFields.map(f => f.id || f.key || f.name));
+          parsedFields.forEach(f => { const k = f.id || f.key || f.name; if (!fIds.has(k)) customFields.push(f); });
+          saveCustomFields();
+        }
         // merge: aggiungi solo ID nuovi
         const empIds    = new Set(employees.map(e => e.id));
         const matchIds  = new Set(matches.map(m => m.id));
@@ -4294,14 +4437,27 @@ function handleBackupFile(input) {
         }
       }
 
-      saveAll();
+      if (!saveAll()) {
+        // Spazio insufficiente: libera la copia di sicurezza (resta in memoria) e riprova
+        try { localStorage.removeItem('lb_pre_restore'); } catch (e) {}
+        if (!saveAll()) {
+          // Ancora niente: si torna ai dati di prima, così nulla va perso
+          const s = JSON.parse(snapshot);
+          employees = s.employees; matches = s.matches; events = s.events; trash = s.trash; calls = s.calls;
+          if (Array.isArray(s.customFields)) customFields = s.customFields;
+          lbPreRestoreMem = null;
+          alert('Il ripristino NON è stato applicato: non c\'è spazio sufficiente sul dispositivo.\nI tuoi dati attuali sono rimasti come prima.');
+          return;
+        }
+      }
       closeSettings();
       renderMatches();
       renderEvents();
       renderDipendenti();
+      updateUndoRestoreButton();
 
-      const action = backupImportMode === 'replace' ? 'sostituiti' : 'uniti';
-      alert(`Backup importato!\n\nDati ${action}:\n• ${parsedEmps.length} dipendenti\n• ${parsedMatches.length} partite\n• ${parsedEvents.length} eventi\n• ${parsedTrash.length} nel cestino`);
+      const action = isReplace ? 'sostituiti' : 'uniti';
+      alert(`Backup importato! Dati ${action}:\n${lines.join('\n')}\n\nSe qualcosa non va: ⚙ Impostazioni → Backup e ripristino → "Annulla ultimo ripristino".`);
     } catch(err) {
       alert('Errore nella lettura del file di backup.\n\nDettagli: ' + err.message);
     }
@@ -4425,7 +4581,8 @@ function doImport() {
   });
   const vals = [...status.values()];
   const added = vals.filter(v => v === 'added').length, completed = vals.filter(v => v === 'completed').length, same = vals.filter(v => v === 'same').length;
-  const dup = mergeDuplicates();
+  const dupPairs = findDuplicatePairs();
+  const dup = (dupPairs.length && confirmDuplicatePairs(dupPairs)) ? mergeDuplicates(dupPairs) : 0;
   saveAll(); closeModal('import-modal');
   showPage('dipendenti');
   alert(`Importazione completata!\n\n• ${added} persone nuove aggiunte\n• ${completed} persone completate con dati nuovi\n• ${same} già complete (nessun cambiamento)` +
@@ -4454,12 +4611,11 @@ function mergePerson(nome, cognome, incoming) {
 
 // Trova le persone doppie (stesso cognome e nome) e le unisce in una sola,
 // spostando su quella anche partite, eventi e chiamate.
-function mergeDuplicates() {
-  const fields = ['matricola','sesso','ddn','citta','provincia','stato','tel','email','docs','note'];
+// Trova le coppie che sembrano la stessa persona (senza toccare niente)
+function findDuplicatePairs() {
   const groups = new Map();
   employees.forEach(e => { const k = personKey(e.cognome, e.nome); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(e); });
-  let merged = 0;
-  const remap = new Map();
+  const pairs = [];
   groups.forEach(list => {
     if (list.length < 2) return;
     const keep = list[0];
@@ -4467,12 +4623,33 @@ function mergeDuplicates() {
       // due matricole diverse o due date di nascita diverse = omonimi, non li unisco
       if ((keep.matricola && other.matricola && keep.matricola !== other.matricola) ||
           (keep.ddn && other.ddn && keep.ddn !== other.ddn)) return;
-      fields.forEach(f => { if (!String(keep[f] || '').trim() && String(other[f] || '').trim()) keep[f] = other[f]; });
-      if (other.ruolo === 'cuoco') keep.ruolo = 'cuoco';
-      keep.customData = Object.assign({}, other.customData || {}, keep.customData || {});
-      remap.set(other.id, keep.id);
-      merged++;
+      pairs.push({ keep, other });
     });
+  });
+  return pairs;
+}
+// Chiede conferma mostrando chi verrebbe unito (possono essere due omonimi veri)
+function confirmDuplicatePairs(pairs) {
+  if (!pairs.length) return false;
+  const fmt = e => `${e.cognome} ${e.nome}` + (e.matricola ? ` (matr. ${e.matricola})` : '') + (e.ddn ? ` (nato/a ${e.ddn})` : '');
+  const list = pairs.slice(0, 15).map(p => `• ${fmt(p.keep)}  +  ${fmt(p.other)}`).join('\n') +
+    (pairs.length > 15 ? `\n… e altre ${pairs.length - 15}` : '');
+  return confirm(`Ho trovato ${plural(pairs.length, 'possibile doppione', 'possibili doppioni')} (stesso nome e cognome):\n\n${list}\n\n` +
+    'Se sono la STESSA persona premi OK per unirle (partite, eventi e chiamate vengono spostati sulla scheda che resta).\n' +
+    'Se possono essere due persone diverse premi Annulla: non cambia niente.');
+}
+function mergeDuplicates(pairs) {
+  const fields = ['matricola','sesso','ddn','citta','provincia','stato','tel','email','docs','note'];
+  if (!pairs) pairs = findDuplicatePairs();
+  let merged = 0;
+  const remap = new Map();
+  pairs.forEach(({ keep, other }) => {
+    if (remap.has(other.id) || remap.has(keep.id)) return;
+    fields.forEach(f => { if (!String(keep[f] || '').trim() && String(other[f] || '').trim()) keep[f] = other[f]; });
+    if (other.ruolo === 'cuoco') keep.ruolo = 'cuoco';
+    keep.customData = Object.assign({}, other.customData || {}, keep.customData || {});
+    remap.set(other.id, keep.id);
+    merged++;
   });
   if (!merged) return 0;
   const fix = x => { if (remap.has(x.empId)) x.empId = remap.get(x.empId); };
@@ -4484,9 +4661,12 @@ function mergeDuplicates() {
   return merged;
 }
 function runMergeDuplicates() {
-  const n = mergeDuplicates();
+  const pairs = findDuplicatePairs();
+  if (!pairs.length) { alert('Nessun doppione trovato.'); return; }
+  if (!confirmDuplicatePairs(pairs)) return;
+  const n = mergeDuplicates(pairs);
   saveAll(); renderDipendenti();
-  alert(n ? `${n} doppioni uniti.` : 'Nessun doppione trovato.');
+  alert(`${n} doppioni uniti.`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4515,6 +4695,7 @@ function openSettings() {
   document.getElementById('bk-count-ev').textContent    = `(${events.length})`;
   document.getElementById('bk-count-trash').textContent = `(${trash.length})`;
   document.getElementById('bk-count-calls').textContent = `(${calls.archive.length} file)`;
+  updateUndoRestoreButton();
   renderCallsArchiveSettings();
   // Popola cestino inline
   cleanupTrash();
@@ -4577,10 +4758,14 @@ function purgeTrashInline(id) {
 // ═══════════════════════════════════════════════════════════════════════════
 // CAMPI PERSONALIZZATI DIPENDENTI
 // ═══════════════════════════════════════════════════════════════════════════
-let customFields = JSON.parse(localStorage.getItem('lb_custom_fields') || '[]');
+let customFields = lbLoad('lb_custom_fields', [], lbIsArray);
 
 function saveCustomFields() {
-  localStorage.setItem('lb_custom_fields', JSON.stringify(customFields));
+  try {
+    localStorage.setItem('lb_custom_fields', JSON.stringify(customFields));
+  } catch (e) {
+    alert('⚠️ Il campo personalizzato NON è stato salvato: la memoria dell\'app è piena.\nFai un backup completo e libera spazio.');
+  }
 }
 
 function renderCustomFieldsList() {
@@ -4648,7 +4833,7 @@ function renderCustomFieldsInModal(emp) {
 // ═══════════════════════════════════════════════════════════════════════════
 // PROMEMORIA BACKUP
 // ═══════════════════════════════════════════════════════════════════════════
-const BACKUP_REMINDER_DAYS = 15;
+const BACKUP_REMINDER_DAYS = 7; // su iPhone/iPad Safari può cancellare i dati dei siti poco usati: meglio backup frequenti
 
 function checkBackupReminder() {
   const lastBackup   = parseInt(localStorage.getItem('lb_last_backup') || '0');
@@ -4660,7 +4845,7 @@ function checkBackupReminder() {
   const dismissedToday = (now - lastDismiss) < 24 * 60 * 60 * 1000;
   if (dismissedToday) return;
 
-  // Mostra se non ha mai fatto backup o sono passati più di 15 giorni
+  // Mostra se non ha mai fatto backup o sono passati più di BACKUP_REMINDER_DAYS giorni
   const needsReminder = (now - lastBackup) > msLimit;
   if (!needsReminder) return;
 
@@ -4687,7 +4872,7 @@ function quickBackupFromBanner() {
   document.getElementById('bk-dipendenti').checked = true;
   document.getElementById('bk-partite').checked    = true;
   document.getElementById('bk-eventi').checked     = true;
-  document.getElementById('bk-cestino').checked    = false;
+  document.getElementById('bk-cestino').checked    = true;
   document.getElementById('bk-chiamate').checked   = true;
   exportBackup();
   // Registra la data dell'ultimo backup e chiude il banner
@@ -5144,6 +5329,28 @@ if (navigator.storage && navigator.storage.persist) {
     if (app) app.insertBefore(bar, app.firstChild);
   }
 })();
+// iPhone/iPad: i dati di Safari e quelli dell'icona sulla Home sono SEPARATI.
+// Avviso (una volta, chiudibile) se l'app è aperta da Safari invece che dalla Home.
+(function () {
+  const standalone = window.navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('lb_safari_notice_dismissed') === '1'; } catch (e) {}
+  if (typeof isAppleMobile !== 'function' || !isAppleMobile() || standalone || dismissed || !location.protocol.startsWith('http')) return;
+  const bar = document.createElement('div');
+  bar.style.cssText = 'background:#eef5ff;border:1px solid #9cc2f5;color:#1d3f6e;border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:13px;line-height:1.4';
+  bar.innerHTML = '<strong>Usa sempre l\'icona sulla schermata Home.</strong> Su iPhone e iPad i dati inseriti qui in Safari ' +
+    'non si vedono nell\'app sulla Home (e viceversa). Per spostarli: fai un backup qui e ripristinalo nell\'app sulla Home. ' +
+    '<button type="button" style="margin-left:6px;border:0;background:#1d3f6e;color:#fff;border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer">Ho capito</button>';
+  bar.querySelector('button').onclick = () => { try { localStorage.setItem('lb_safari_notice_dismissed', '1'); } catch (e) {} bar.remove(); };
+  const app = document.querySelector('.app');
+  if (app) app.insertBefore(bar, app.firstChild);
+})();
+// Se all'avvio un dato salvato era rovinato, avvisa (l'originale è conservato)
+if (lbCorruptKeys.length) {
+  setTimeout(() => alert('⚠️ Alcuni dati salvati erano danneggiati e non sono stati caricati (' + lbCorruptKeys.join(', ') + ').\n\n' +
+    'Una copia dei dati danneggiati è stata conservata. Se hai un backup recente, ripristinalo da ⚙ Impostazioni → Backup e ripristino.'), 300);
+}
 // Service worker: dopo la prima apertura online l'app funziona anche senza internet
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {
