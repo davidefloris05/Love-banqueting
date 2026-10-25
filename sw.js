@@ -1,5 +1,5 @@
 // Love Banqueting — salva l'app sul dispositivo per usarla senza internet
-const CACHE = 'love-banqueting-v7';
+const CACHE = 'love-banqueting-v8';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

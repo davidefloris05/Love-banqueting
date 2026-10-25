@@ -301,10 +301,8 @@
         <option value="cuoco">Solo cuochi</option>
       </select>
       <button class="btn-secondary" onclick="openImportModal()">Importa Excel</button>
-      <button class="btn-secondary" onclick="triggerMatricoleImport()">Importa matricole</button>
       <button class="btn-primary" onclick="openEmpModal()">+ Aggiungi</button>
     </div>
-    <input type="file" id="matricole-file" accept=".xlsx,.xls" style="display:none" onchange="handleMatricoleFile(this)" />
     <div id="dip-count" style="font-size:12px;color:#999;margin-bottom:12px"></div>
     <div id="dip-list"></div>
   </div>
@@ -428,9 +426,12 @@
       <button class="btn-primary" onclick="openAddCustomField()">+ Aggiungi casella info</button>
 
       <div style="border-top:1px solid #eee;padding-top:14px;margin-top:16px">
-        <div style="font-weight:600;font-size:14px;margin-bottom:4px">Matricole</div>
-        <div style="font-size:12px;color:#888;margin-bottom:12px">Carica il foglio presenze dell'ufficio paghe: l'app mette la matricola a chi ha lo stesso cognome e nome.</div>
-        <button class="btn-secondary" onclick="triggerMatricoleImport()">Importa matricole da foglio presenze</button>
+        <div style="font-weight:600;font-size:14px;margin-bottom:4px">Importa e unisci dati</div>
+        <div style="font-size:12px;color:#888;margin-bottom:12px">Carica qualsiasi file Excel (elenco dipendenti, foglio presenze con le matricole…): chi c'è già viene completato con i dati che mancano, chi non c'è viene aggiunto.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-secondary" onclick="openImportModal()">Importa Excel</button>
+          <button class="btn-secondary" onclick="runMergeDuplicates()">Unisci persone doppie</button>
+        </div>
       </div>
     </div>
 
@@ -672,8 +673,9 @@
         <input type="file" id="import-file" accept=".xlsx,.xls,.csv" onchange="handleFileSelect(this)" />
         <div style="margin-top:14px;font-size:13px;color:#888;line-height:1.6">
           <strong style="color:#555">Come preparare il file:</strong><br>
-          Prima riga = intestazioni. Colonne riconosciute automaticamente:<br>
-          <code style="font-size:11px;background:#f5f5f5;padding:2px 6px;border-radius:4px">nome, cognome, sesso, data nascita, comune, provincia, nazione, email</code>
+          Va bene qualsiasi file con <strong>Cognome</strong> e <strong>Nome</strong> (anche il foglio presenze con le matricole).<br>
+          Chi è già in lista viene <strong>completato</strong> con i dati che mancano, chi non c'è viene <strong>aggiunto</strong>. Niente doppioni.<br>
+          <code style="font-size:11px;background:#f5f5f5;padding:2px 6px;border-radius:4px">matricola, cognome, nome, sesso, data nascita, luogo nascita, provincia, nazione, email, telefono</code>
         </div>
       </div>
       <div id="import-step-2" style="display:none">
@@ -2639,17 +2641,21 @@ const FASCE = [
   { key: '25h',  label: '2 ore e mezza prima',    short: '2h 30 prima',  cls: 'f-25h' }
 ];
 const MANSIONI = ['Controllo buffet','Bar','Sbarazzo','Caldi'];
+// Nomi di colonna riconosciuti (scritti senza spazi, minuscoli). Prima si cerca la corrispondenza esatta,
+// poi "contiene", saltando le colonne indicate in 'not' (es. residenza invece di nascita).
 const FIELD_ALIASES = {
-  nome:['nome','name','first name','firstname'],
-  cognome:['cognome','surname','last name','lastname'],
-  sesso:['sesso','genere','gender','sex','m/f'],
-  ddn:['data nascita','data di nascita','nascita','birth','dob','data'],
-  citta:['comune','comune di nascita','comune nascita','city','citta'],
-  provincia:['provincia','prov','province'],
-  stato:['nazione','nazione nascita','stato','country','nazione di nascita'],
-  email:['email','e-mail','mail'],
-  tel:['telefono','tel','phone','cellulare','cell']
+  matricola: { a: ['matricola', 'matr', 'nmatricola', 'badge'], not: [] },
+  cognome:   { a: ['cognome', 'surname', 'lastname'], not: [] },
+  nome:      { a: ['nome', 'name', 'firstname'], not: ['cognome', 'surname', 'lastname', 'utente', 'file'] },
+  sesso:     { a: ['sesso', 'genere', 'gender', 'sex', 'mf'], not: [] },
+  ddn:       { a: ['datanascita', 'datadinascita', 'nascita', 'birth', 'dob'], not: ['luogo', 'comune', 'stato', 'nazione', 'prov', 'citta'] },
+  citta:     { a: ['comunedinascita', 'comunenascita', 'luogonascita', 'luogodinascita', 'cittadinascita', 'comune', 'luogo', 'city', 'citta'], not: ['residenza', 'cittadinanza', 'data'] },
+  provincia: { a: ['provinciadinascita', 'provincianascita', 'provnascita', 'provincia', 'prov', 'province'], not: ['residenza'] },
+  stato:     { a: ['nazionedinascita', 'nazionenascita', 'statodinascita', 'statonascita', 'nazione', 'stato', 'country'], not: ['residenza', 'civile'] },
+  email:     { a: ['email', 'mail', 'pec'], not: [] },
+  tel:       { a: ['telefono', 'cellulare', 'tel', 'phone', 'cell'], not: [] }
 };
+const IMPORT_FIELDS = ['matricola', 'cognome', 'nome', 'sesso', 'ddn', 'citta', 'provincia', 'stato', 'email', 'tel'];
 const TRASH_DAYS = 15;
 
 let employees = JSON.parse(localStorage.getItem('lb_employees') || '[]');
@@ -4325,21 +4331,43 @@ function processFile(file) {
   reader.onload = function(ev) {
     try {
       const wb = XLSX.read(ev.target.result, { type:'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
-      if (raw.length < 2) { alert('File vuoto.'); return; }
-      importHeaders = raw[0].map(h=>String(h).trim());
-      importRows = raw.slice(1).filter(r=>r.some(c=>c!==''));
+      // Cerca la riga delle intestazioni (anche se non è la prima, come nel foglio presenze)
+      // e legge tutti i fogli che hanno le stesse colonne (es. un foglio per ogni mese).
+      const isCognome = c => ['cognome','surname','lastname'].includes(normHeader(c));
+      importHeaders = []; importRows = [];
+      let sig = null;
+      wb.SheetNames.forEach((sn, idx) => {
+        const raw = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header:1, defval:'' });
+        let h = raw.slice(0, 25).findIndex(r => r.some(isCognome));
+        if (h < 0) { if (idx === 0 && raw.length >= 2) h = 0; else return; }
+        const hdr = raw[h].map(x => String(x).trim());
+        const thisSig = hdr.slice(0, 6).map(normHeader).join('|');
+        if (sig === null) { sig = thisSig; importHeaders = hdr; }
+        else if (thisSig !== sig) return;
+        raw.slice(h + 1).filter(r => r.some(c => String(c).trim() !== '')).forEach(r => importRows.push(r));
+      });
+      if (!importRows.length) { alert('File vuoto o colonne non riconosciute.'); return; }
+      importSheetsInfo = wb.SheetNames.length;
       showMappingStep();
-    } catch(err) { alert('Errore lettura file.'); }
+    } catch(err) { alert('Errore lettura file.\n\n' + err.message); }
   };
   reader.readAsArrayBuffer(file);
 }
-function autoDetect(fieldKey) {
-  const aliases = FIELD_ALIASES[fieldKey] || [];
-  for (let i = 0; i < importHeaders.length; i++) {
-    const h = importHeaders[i].toLowerCase().trim();
-    if (aliases.some(a => h===a || h.includes(a) || a.includes(h))) return i;
+let importSheetsInfo = 1;
+function normHeader(h) {
+  return String(h || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+}
+function autoDetect(fieldKey, used) {
+  const def = FIELD_ALIASES[fieldKey];
+  if (!def) return -1;
+  const hs = importHeaders.map(normHeader);
+  for (const a of def.a) {                         // 1) uguale
+    const i = hs.findIndex((h, k) => h === a && !used.has(k));
+    if (i >= 0) return i;
+  }
+  for (const a of def.a) {                         // 2) contiene
+    const i = hs.findIndex((h, k) => h && !used.has(k) && h.includes(a) && !def.not.some(n => h.includes(n)));
+    if (i >= 0) return i;
   }
   return -1;
 }
@@ -4348,19 +4376,21 @@ function showMappingStep() {
   document.getElementById('import-step-2').style.display = 'block';
   document.getElementById('import-btn').style.display = 'inline-block';
   document.getElementById('import-info').innerHTML =
-    `File caricato. <strong>${importRows.length} righe</strong>, <strong>${importHeaders.length} colonne</strong>.`;
+    `File caricato. <strong>${importRows.length} righe</strong>${importSheetsInfo > 1 ? ` da ${importSheetsInfo} fogli` : ''}.<br>
+     Chi c'è già viene <strong>completato</strong> con i dati che mancano (niente doppioni), chi non c'è viene <strong>aggiunto</strong>.`;
   const fields = [
-    {key:'nome',label:'Nome *'},{key:'cognome',label:'Cognome *'},
+    {key:'cognome',label:'Cognome *'},{key:'nome',label:'Nome *'},{key:'matricola',label:'Matricola'},
     {key:'sesso',label:'Sesso (M/F)'},{key:'ddn',label:'Data di nascita'},
-    {key:'citta',label:'Comune'},{key:'provincia',label:'Provincia'},
-    {key:'stato',label:'Nazione'},{key:'email',label:'Email'},{key:'tel',label:'Telefono'}
+    {key:'citta',label:'Comune di nascita'},{key:'provincia',label:'Provincia di nascita'},
+    {key:'stato',label:'Nazione di nascita'},{key:'email',label:'Email'},{key:'tel',label:'Telefono'}
   ];
   const opts = '<option value="-1">— Non importare —</option>' +
     importHeaders.map((h,i)=>`<option value="${i}">${h}</option>`).join('');
   document.getElementById('col-mapping').innerHTML = fields.map(f =>
     `<div class="col-map-row"><span class="field-name">${f.label}</span><select id="map-${f.key}">${opts}</select></div>`
   ).join('');
-  fields.forEach(f => { const idx = autoDetect(f.key); if (idx>=0) document.getElementById('map-'+f.key).value = idx; });
+  const used = new Set();
+  fields.forEach(f => { const idx = autoDetect(f.key, used); if (idx>=0) { used.add(idx); document.getElementById('map-'+f.key).value = idx; } });
   const prev = importRows.slice(0,3);
   document.getElementById('preview-wrap').innerHTML =
     `<p style="font-size:12px;color:#888;margin-bottom:6px">Anteprima:</p>
@@ -4372,26 +4402,91 @@ function showMappingStep() {
 function doImport() {
   const gc = k => parseInt(document.getElementById('map-'+k).value);
   if (gc('nome')<0 || gc('cognome')<0) { alert('Abbina almeno Nome e Cognome.'); return; }
-  let imp=0, skip=0;
+  let skip = 0;
+  const status = new Map(); // una sola voce per persona (il foglio presenze ripete i nomi in ogni mese)
+  const rank = { same: 0, completed: 1, added: 2 };
   importRows.forEach(row => {
-    const gv = k => { const c=gc(k); return c>=0?String(row[c]||'').trim():''; };
-    const nome=gv('nome'), cognome=gv('cognome');
-    if (!nome||!cognome) { skip++; return; }
-    let sesso = gv('sesso').toUpperCase();
-    if (!['M','F'].includes(sesso)) sesso='';
-    employees.push({
-      id: Date.now().toString()+Math.random().toString(36).slice(2,6),
-      nome, cognome, sesso,
-      ddn: parseToISO(gv('ddn')),
+    const gv = k => { const c = gc(k); return c >= 0 ? String(row[c] ?? '').trim() : ''; };
+    const nome = gv('nome'), cognome = gv('cognome');
+    if (!nome && !cognome) return;                       // riga vuota
+    if (!nome || !cognome || normName(cognome) === 'COGNOME') { skip++; return; }
+    let sesso = gv('sesso').toUpperCase().slice(0, 1);
+    if (!['M','F'].includes(sesso)) sesso = '';
+    let matricola = gv('matricola').replace(/\.0+$/, '');
+    if (!/^[A-Za-z0-9-]+$/.test(matricola)) matricola = '';
+    const incoming = {
+      matricola, sesso, ddn: parseToISO(gv('ddn')),
       citta: gv('citta'), provincia: gv('provincia'), stato: gv('stato'),
-      email: gv('email'), tel: gv('tel'), docs:'', note:'', ruolo:'cameriere', matricola:''
-    });
-    imp++;
+      email: gv('email'), tel: gv('tel')
+    };
+    const r = mergePerson(nome, cognome, incoming);
+    const k = personKey(cognome, nome);
+    if (!status.has(k) || rank[r] > rank[status.get(k)]) status.set(k, r);
   });
+  const vals = [...status.values()];
+  const added = vals.filter(v => v === 'added').length, completed = vals.filter(v => v === 'completed').length, same = vals.filter(v => v === 'same').length;
+  const dup = mergeDuplicates();
   saveAll(); closeModal('import-modal');
   showPage('dipendenti');
-  renderDipendenti();
-  alert(`Importazione completata!\n${imp} dipendenti importati.` + (skip?`\n${skip} righe saltate.`:''));
+  alert(`Importazione completata!\n\n• ${added} persone nuove aggiunte\n• ${completed} persone completate con dati nuovi\n• ${same} già complete (nessun cambiamento)` +
+        (dup ? `\n• ${dup} doppioni uniti` : '') + (skip ? `\n\n${skip} righe saltate (senza nome o cognome).` : ''));
+}
+
+// Unisce una persona importata con quella già presente (stesso cognome e nome):
+// riempie solo i dati che mancano, non cancella né sovrascrive niente.
+function personKey(cognome, nome) { return normName(cognome) + '|' + normName(nome); }
+function niceCase(s) { s = String(s).trim().replace(/\s+/g, ' '); return s === s.toUpperCase() ? titleCase(s) : s; }
+function mergePerson(nome, cognome, incoming) {
+  const key = personKey(cognome, nome);
+  const candidates = employees.filter(e => personKey(e.cognome, e.nome) === key);
+  // omonimi: se la matricola è diversa sono due persone diverse
+  const emp = candidates.find(e => !incoming.matricola || !e.matricola || e.matricola === incoming.matricola);
+  if (!emp) {
+    employees.push(Object.assign({ id: newId(), nome: niceCase(nome), cognome: niceCase(cognome),
+      sesso: '', ddn: '', citta: '', provincia: '', stato: '', tel: '', email: '', docs: '', note: '',
+      ruolo: 'cameriere', matricola: '' }, Object.fromEntries(Object.entries(incoming).filter(([k, v]) => v))));
+    return 'added';
+  }
+  let changed = false;
+  Object.entries(incoming).forEach(([k, v]) => { if (v && !String(emp[k] || '').trim()) { emp[k] = v; changed = true; } });
+  return changed ? 'completed' : 'same';
+}
+
+// Trova le persone doppie (stesso cognome e nome) e le unisce in una sola,
+// spostando su quella anche partite, eventi e chiamate.
+function mergeDuplicates() {
+  const fields = ['matricola','sesso','ddn','citta','provincia','stato','tel','email','docs','note'];
+  const groups = new Map();
+  employees.forEach(e => { const k = personKey(e.cognome, e.nome); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(e); });
+  let merged = 0;
+  const remap = new Map();
+  groups.forEach(list => {
+    if (list.length < 2) return;
+    const keep = list[0];
+    list.slice(1).forEach(other => {
+      // due matricole diverse o due date di nascita diverse = omonimi, non li unisco
+      if ((keep.matricola && other.matricola && keep.matricola !== other.matricola) ||
+          (keep.ddn && other.ddn && keep.ddn !== other.ddn)) return;
+      fields.forEach(f => { if (!String(keep[f] || '').trim() && String(other[f] || '').trim()) keep[f] = other[f]; });
+      if (other.ruolo === 'cuoco') keep.ruolo = 'cuoco';
+      keep.customData = Object.assign({}, other.customData || {}, keep.customData || {});
+      remap.set(other.id, keep.id);
+      merged++;
+    });
+  });
+  if (!merged) return 0;
+  const fix = x => { if (remap.has(x.empId)) x.empId = remap.get(x.empId); };
+  matches.forEach(m => { (m.staff || []).forEach(fix); (m.cooks || []).forEach(fix); });
+  events.forEach(ev => { (ev.staff || []).forEach(fix); (ev.cooks || []).forEach(fix); });
+  calls.manual.forEach(fix);
+  calls.archive.forEach(a => a.rows.forEach(fix));
+  employees = employees.filter(e => !remap.has(e.id));
+  return merged;
+}
+function runMergeDuplicates() {
+  const n = mergeDuplicates();
+  saveAll(); renderDipendenti();
+  alert(n ? `${n} doppioni uniti.` : 'Nessun doppione trovato.');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4400,56 +4495,8 @@ function doImport() {
 function normName(s) {
   return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z' ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
-function triggerMatricoleImport() {
-  const el = document.getElementById('matricole-file');
-  el.value = ''; el.click();
-}
-function handleMatricoleFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function (ev) {
-    try {
-      const wb = XLSX.read(ev.target.result, { type: 'array' });
-      // Legge tutti i fogli: colonna A = matricola, B = cognome, C = nome
-      const found = new Map();
-      wb.SheetNames.forEach(sn => {
-        const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '' });
-        rows.forEach(r => {
-          const cog = normName(r[1]), nom = normName(r[2]);
-          if (!cog || !nom || cog === 'COGNOME') return;
-          const matr = String(r[0] || '').trim();
-          const key = cog + '|' + nom;
-          const prev = found.get(key);
-          if (!prev || (!prev.matr && matr)) found.set(key, { cog: String(r[1]).trim(), nom: String(r[2]).trim(), matr: /^\d+$/.test(matr) ? matr : '' });
-        });
-      });
-      if (!found.size) { alert('Non ho trovato nomi nel file. Deve avere Matricola, Cognome e Nome nelle prime tre colonne.'); return; }
+function triggerMatricoleImport() { openImportModal(); }
 
-      let updated = 0, already = 0;
-      const missing = [];
-      found.forEach((v, key) => {
-        const emp = employees.find(e => normName(e.cognome) + '|' + normName(e.nome) === key);
-        if (emp) {
-          if (v.matr && emp.matricola !== v.matr) { emp.matricola = v.matr; updated++; } else already++;
-        } else missing.push(v);
-      });
-      let msg = `Matricole aggiornate: ${updated}\nGià a posto: ${already}`;
-      if (missing.length) {
-        msg += `\n\nNel file ci sono ${missing.length} persone che non sono nella tua lista Dipendenti.\nVuoi aggiungerle? (verranno aggiunte come camerieri, poi puoi cambiare il ruolo)`;
-        if (confirm(msg)) {
-          missing.forEach(v => employees.push({
-            id: newId(), nome: titleCase(v.nom), cognome: titleCase(v.cog), sesso: '', ddn: '', citta: '', provincia: '',
-            stato: '', tel: '', email: '', docs: '', note: '', ruolo: 'cameriere', matricola: v.matr
-          }));
-          alert(`${missing.length} persone aggiunte.`);
-        }
-      } else alert(msg);
-      saveAll(); renderDipendenti();
-    } catch (err) { alert('Errore nella lettura del file.\n\n' + err.message); }
-  };
-  reader.readAsArrayBuffer(file);
-}
 function titleCase(s) {
   return String(s).toLowerCase().replace(/(^|[\s'-])(\S)/g, (m, a, b) => a + b.toUpperCase());
 }
