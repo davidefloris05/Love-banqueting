@@ -5329,8 +5329,8 @@ if (navigator.storage && navigator.storage.persist) {
     if (app) app.insertBefore(bar, app.firstChild);
   }
 })();
-// iPhone/iPad: i dati di Safari e quelli dell'icona sulla Home sono SEPARATI.
-// Avviso (una volta, chiudibile) se l'app è aperta da Safari invece che dalla Home.
+// iPhone/iPad: i dati del browser (Safari, Chrome, Opera...) e quelli dell'icona sulla Home sono SEPARATI.
+// Avviso (una volta, chiudibile) se l'app è aperta nel browser invece che dalla Home.
 (function () {
   const standalone = window.navigator.standalone === true ||
     (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
@@ -5339,8 +5339,8 @@ if (navigator.storage && navigator.storage.persist) {
   if (typeof isAppleMobile !== 'function' || !isAppleMobile() || standalone || dismissed || !location.protocol.startsWith('http')) return;
   const bar = document.createElement('div');
   bar.style.cssText = 'background:#eef5ff;border:1px solid #9cc2f5;color:#1d3f6e;border-radius:10px;padding:10px 14px;margin:0 0 16px;font-size:13px;line-height:1.4';
-  bar.innerHTML = '<strong>Usa sempre l\'icona sulla schermata Home.</strong> Su iPhone e iPad i dati inseriti qui in Safari ' +
-    'non si vedono nell\'app sulla Home (e viceversa). Per spostarli: fai un backup qui e ripristinalo nell\'app sulla Home. ' +
+  bar.innerHTML = '<strong>Usa sempre l\'icona sulla schermata Home.</strong> Su iPhone e iPad i dati inseriti qui nel browser ' +
+    '(Safari, Chrome, Opera…) non si vedono nell\'app sulla Home, né negli altri browser. Per spostarli: fai un backup qui e ripristinalo nell\'app sulla Home. ' +
     '<button type="button" style="margin-left:6px;border:0;background:#1d3f6e;color:#fff;border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer">Ho capito</button>';
   bar.querySelector('button').onclick = () => { try { localStorage.setItem('lb_safari_notice_dismissed', '1'); } catch (e) {} bar.remove(); };
   const app = document.querySelector('.app');
