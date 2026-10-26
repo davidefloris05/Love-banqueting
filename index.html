@@ -227,6 +227,7 @@
   <div class="top-bar">
     <h1><span class="love">Love</span> Banqueting</h1>
     <div class="top-actions">
+      <button class="btn-secondary" onclick="openHoursModal()" title="Scarica il file ore del mese da dare ai camerieri">⏱ File ore</button>
       <button class="btn-icon" onclick="openSettings()" title="Impostazioni">⚙</button>
     </div>
   </div>
@@ -634,6 +635,27 @@
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeModal('callpick-modal')">Annulla</button>
       <button class="btn-primary" id="cp-ok" onclick="confirmCallPick()">Aggiungi chiamata</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: File ore del mese -->
+<div class="modal-backdrop" id="hours-modal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title">File ore del mese</span>
+      <button class="btn-cancel" onclick="closeModal('hours-modal')">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <div class="info-box" style="margin:0">Il file dove i camerieri segnano rimborsi, location, macchina e orari. Esce già con tutti i giorni del mese scelto, pronto da mettere su Classroom.</div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div class="field"><label>Mese</label><select id="hours-month"></select></div>
+        <div class="field"><label>Anno</label><select id="hours-year"></select></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('hours-modal')">Annulla</button>
+      <button class="btn-primary" onclick="downloadHoursFile()">⬇ Scarica file ore</button>
     </div>
   </div>
 </div>
@@ -5398,6 +5420,65 @@ function buildCallsWorkbook(arch) {
   });
   return wb;
 }
+// ─── File ore del mese (modello del capo: "MESE - CHIAMATA.xlsx") ──────────
+function openHoursModal() {
+  const now = new Date();
+  document.getElementById('hours-month').innerHTML = MESI.map((m, i) =>
+    `<option value="${i + 1}" ${i === now.getMonth() ? 'selected' : ''}>${m.charAt(0).toUpperCase() + m.slice(1)}</option>`).join('');
+  const y = now.getFullYear();
+  document.getElementById('hours-year').innerHTML = [y - 1, y, y + 1].map(v =>
+    `<option value="${v}" ${v === y ? 'selected' : ''}>${v}</option>`).join('');
+  openModal('hours-modal');
+}
+function buildHoursWorkbook(y, m) {
+  const thin = { style: 'thin', color: { rgb: 'FF000000' } };
+  const box = { left: thin, right: thin, top: thin, bottom: thin };
+  const fill = rgb => ({ patternType: 'solid', fgColor: { rgb } });
+  const mid = { horizontal: 'center', vertical: 'center' };
+  const body = (bg, numFmt) => ({ font: { name: 'Play', sz: 10 }, fill: fill(bg), alignment: mid, border: box, ...(numFmt ? { numFmt } : {}) });
+  const enc = (r, c) => XLSX.utils.encode_cell({ r, c });
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const ws = {};
+
+  // Riga 1: nome e cognome (da compilare)
+  ws[enc(0, 0)] = { t: 's', v: 'NOME E COGNOME ', s: { font: { name: 'Lemon', sz: 12, bold: true }, alignment: { vertical: 'center' } } };
+  // Riga 2: intestazioni
+  const head = { font: { name: 'LEMON MILK Medium', sz: 11 }, alignment: { ...mid, wrapText: true } };
+  [MESI[m - 1].toUpperCase(), 'RIMBORSI ', 'LOCATION', 'MACCHINA ', 'orario inizio ', 'orario fine ', 'totale ']
+    .forEach((v, c) => { ws[enc(1, c)] = { t: 's', v, s: head }; });
+  // Una riga per ogni giorno del mese
+  for (let d = 1; d <= days; d++) {
+    const r = 1 + d, row = r + 1;
+    ws[enc(r, 0)] = { t: 'n', v: xlSerial(y, m, d), z: 'dddd\\ d', s: body('FFF3FAFF', 'dddd\\ d') };
+    ws[enc(r, 1)] = { t: 's', v: '', s: body('FFF3FAFF', '[h]:mm') };
+    ws[enc(r, 2)] = { t: 's', v: '', s: body('FFF3FAFF', '[h]:mm') };
+    ws[enc(r, 3)] = { t: 's', v: '', s: body('FFF3FAFF', '[h]:mm') };
+    ws[enc(r, 4)] = { t: 'n', v: 0, z: 'h:mm', s: body('FFF7F7FF', 'h:mm') };
+    ws[enc(r, 5)] = { t: 'n', v: 0, z: 'h:mm', s: body('FFF7F7FF', 'h:mm') };
+    // MOD(...;1): conta giusto anche i turni che finiscono dopo mezzanotte (es. 18:00 → 01:00)
+    ws[enc(r, 6)] = { t: 'n', v: 0, f: `MOD(F${row}-E${row},1)`, z: '[h]:mm', s: body('FFD9D9FF', '[h]:mm') };
+  }
+  // Totale ore del mese
+  const last = days + 2;
+  ws[enc(last + 1, 6)] = { t: 'n', v: 0, f: `SUM(G3:G${last})`, z: '[h]:mm', s: { font: { name: 'Aptos Narrow', sz: 12 }, numFmt: '[h]:mm' } };
+
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: last + 1, c: 6 } });
+  ws['!merges'] = [XLSX.utils.decode_range('E1:G1')];
+  ws['!cols'] = [17.8, 13.5, 13, 12, 11, 12, 8.3].map(wch => ({ wch }));
+  ws['!rows'] = [{ hpt: 28 }, { hpt: 15.75 }].concat(Array.from({ length: days }, () => ({ hpt: 30 })));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Foglio1');
+  return wb;
+}
+function downloadHoursFile() {
+  const m = +document.getElementById('hours-month').value;
+  const y = +document.getElementById('hours-year').value;
+  const out = XLSX.write(buildHoursWorkbook(y, m), { bookType: 'xlsx', type: 'array', cellStyles: true });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  closeModal('hours-modal');
+  shareOrDownload(blob, `${MESI[m - 1].toUpperCase()} - CHIAMATA.xlsx`);
+}
+
 function downloadCallsXlsx(arch) {
   // usa nome e matricola aggiornati (es. matricole importate dopo lo scarico)
   const fresh = Object.assign({}, arch, { rows: arch.rows.map(r => {
