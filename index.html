@@ -371,7 +371,7 @@
           <button class="btn-secondary" id="undo-restore-btn" onclick="undoLastRestore()" style="display:none">↩ Annulla ultimo ripristino</button>
         </div>
         <div style="font-size:11px;color:#aaa;margin-top:10px;line-height:1.5">
-          <strong>Unisci:</strong> aggiunge solo le cose che non hai già.<br>
+          <strong>Unisci:</strong> aggiunge le cose nuove e completa quelle che hai già (es. camerieri aggiunti a una partita, dati mancanti di un dipendente). Non cancella mai niente.<br>
           <strong>Sostituisci:</strong> rimpiazza solo le categorie contenute nel file; le altre restano come sono.<br>
           Prima di importare vedi cosa contiene il file, e viene salvata una copia per poter annullare (per 3 giorni).
         </div>
@@ -4212,6 +4212,124 @@ function undoLastRestore() {
   }
 })();
 
+// ── Unione intelligente di un backup (tasto "Unisci") ─────────────────────
+// Aggiunge ciò che manca e completa ciò che c'è già. Non cancella e non sovrascrive mai
+// un dato già compilato: per questo è sicuro anche usarlo più volte di fila.
+function smartMergeBackup(inc) {
+  const st = { empNew: 0, empUpd: 0, matchNew: 0, matchUpd: 0, evNew: 0, evUpd: 0, trashNew: 0, callsNew: 0 };
+  const remap = new Map(); // id dipendente nel file → id dipendente su questo dispositivo
+  const empFields = ['nome','cognome','matricola','sesso','ddn','citta','provincia','stato','tel','email','docs','note'];
+  const filled = v => String(v ?? '').trim() !== '';
+
+  // Dipendenti: stesso id, oppure stesso cognome e nome (con matricola compatibile)
+  (inc.emps || []).forEach(p => {
+    let e = employees.find(x => x.id === p.id);
+    if (!e) {
+      const k = personKey(p.cognome, p.nome);
+      e = employees.find(x => personKey(x.cognome, x.nome) === k && (!p.matricola || !x.matricola || x.matricola === p.matricola));
+    }
+    if (!e) { employees.push(p); st.empNew++; return; }
+    remap.set(p.id, e.id);
+    let ch = false;
+    empFields.forEach(f => { if (!filled(e[f]) && filled(p[f])) { e[f] = p[f]; ch = true; } });
+    if (p.ruolo === 'cuoco' && e.ruolo !== 'cuoco') { e.ruolo = 'cuoco'; ch = true; } // "cameriere" è il valore di partenza
+    if (p.customData) {
+      e.customData = e.customData || {};
+      Object.entries(p.customData).forEach(([k, v]) => { if (!filled(e.customData[k]) && filled(v)) { e.customData[k] = v; ch = true; } });
+    }
+    if (ch) st.empUpd++;
+  });
+  const rid = id => remap.get(id) || id;
+
+  // Persone assegnate (camerieri/cuochi): aggiunge quelle che mancano, senza doppioni
+  function mergeList(target, incoming, sameSpot) {
+    let ch = false;
+    (incoming || []).forEach(a => {
+      const b = Object.assign({}, a, { empId: rid(a.empId) });
+      if (target.some(x => x.id === b.id || (x.empId === b.empId && sameSpot(x, b)))) return;
+      target.push(b); ch = true;
+    });
+    return ch;
+  }
+  function fillFields(t, src, fields) {
+    let ch = false;
+    fields.forEach(f => { if (!filled(t[f]) && filled(src[f])) { t[f] = src[f]; ch = true; } });
+    ['callsW', 'callsC'].forEach(f => { if (src[f] && !t[f]) { t[f] = true; ch = true; } });
+    return ch;
+  }
+
+  // Partite
+  (inc.matches || []).forEach(m => {
+    const t = matches.find(x => x.id === m.id);
+    if (!t) {
+      matches.push(Object.assign({}, m, { staff: (m.staff || []).map(s => Object.assign({}, s, { empId: rid(s.empId) })),
+                                          cooks: (m.cooks || []).map(c => Object.assign({}, c, { empId: rid(c.empId) })) }));
+      st.matchNew++; return;
+    }
+    t.staff = t.staff || []; t.cooks = t.cooks || [];
+    let ch = fillFields(t, m, ['nome', 'data', 'ora', 'oraCuochi']);
+    if (mergeList(t.staff, m.staff, () => true)) ch = true;          // una persona una sola volta per partita
+    if (mergeList(t.cooks, m.cooks, () => true)) ch = true;
+    t.staff.forEach(s => { const o = (m.staff || []).find(x => x.id === s.id); if (o && !filled(s.mansione) && filled(o.mansione)) { s.mansione = o.mansione; ch = true; } });
+    if (ch) st.matchUpd++;
+  });
+
+  // Eventi (comprese le fasce orarie)
+  (inc.events || []).forEach(ev => {
+    const t = events.find(x => x.id === ev.id);
+    if (!t) {
+      events.push(Object.assign({}, ev, { staff: (ev.staff || []).map(s => Object.assign({}, s, { empId: rid(s.empId) })),
+                                          cooks: (ev.cooks || []).map(c => Object.assign({}, c, { empId: rid(c.empId) })) }));
+      st.evNew++; return;
+    }
+    t.slots = t.slots || []; t.staff = t.staff || []; t.cooks = t.cooks || [];
+    let ch = fillFields(t, ev, ['nome', 'data', 'luogo', 'note', 'oraCuochi']);
+    const slotMap = new Map();
+    (ev.slots || []).forEach(sl => {
+      const same = t.slots.find(x => x.id === sl.id || (x.ora === sl.ora && (x.label || '') === (sl.label || '')));
+      if (same) slotMap.set(sl.id, same.id); else { t.slots.push(sl); ch = true; }
+    });
+    const staffIn = (ev.staff || []).map(s => Object.assign({}, s, { slotId: slotMap.get(s.slotId) || s.slotId }));
+    if (mergeList(t.staff, staffIn, (x, b) => x.slotId === b.slotId)) ch = true;
+    if (mergeList(t.cooks, ev.cooks, () => true)) ch = true;
+    if (ch) st.evUpd++;
+  });
+
+  // Cestino
+  if (inc.trash) {
+    const ids = new Set(trash.map(t => t.id));
+    inc.trash.forEach(t => { if (!ids.has(t.id)) { trash.push(t); st.trashNew++; } });
+  }
+
+  // Chiamate: aggiunte/tolte a mano e file archiviati
+  if (inc.calls) {
+    const key = x => x.type + '|' + x.empId + '|' + x.date;
+    const have = new Set(calls.manual.map(key)), haveIds = new Set(calls.manual.map(x => x.id));
+    (inc.calls.manual || []).forEach(x => {
+      const y = Object.assign({}, x, { empId: rid(x.empId) });
+      if (haveIds.has(y.id) || have.has(key(y))) return;
+      calls.manual.push(y); have.add(key(y)); st.callsNew++;
+    });
+    const aIds = new Set(calls.archive.map(x => x.id)), aKeys = new Set(calls.archive.map(x => x.from + '|' + x.to));
+    (inc.calls.archive || []).forEach(a => {
+      if (aIds.has(a.id) || aKeys.has(a.from + '|' + a.to)) return;
+      calls.archive.push(Object.assign({}, a, { rows: (a.rows || []).map(r => Object.assign({}, r, { empId: rid(r.empId) })) }));
+      st.callsNew++;
+    });
+    if (inc.calls.periodStart && (!calls.periodStart || inc.calls.periodStart > calls.periodStart)) calls.periodStart = inc.calls.periodStart;
+  }
+  return st;
+}
+function mergeStatsText(st) {
+  const out = [];
+  if (st.empNew || st.empUpd) out.push(`• Dipendenti: ${st.empNew} nuovi, ${st.empUpd} completati`);
+  if (st.matchNew || st.matchUpd) out.push(`• Partite: ${st.matchNew} nuove, ${st.matchUpd} aggiornate`);
+  if (st.evNew || st.evUpd) out.push(`• Eventi: ${st.evNew} nuovi, ${st.evUpd} aggiornati`);
+  if (st.trashNew) out.push(`• Cestino: ${st.trashNew} elementi aggiunti`);
+  if (st.callsNew) out.push(`• Chiamate: ${st.callsNew} novità`);
+  return out.length ? out.join('\n') : '• Niente di nuovo: avevi già tutto.';
+}
+
 function handleBackupFile(input) {
   const file = input.files[0];
   if (!file) return;
@@ -4392,7 +4510,7 @@ function handleBackupFile(input) {
         msg += 'SOSTITUISCI: queste categorie prenderanno il posto di quelle attuali.';
         if (kept.length) msg += `\nNon presenti nel file, restano come sono: ${kept.join(', ')}.`;
       } else {
-        msg += 'UNISCI: verranno aggiunte solo le cose che non hai già.';
+        msg += 'UNISCI: verranno aggiunte le cose nuove e completate quelle che hai già (camerieri e cuochi aggiunti, fasce orarie, dati mancanti). Non viene cancellato niente.';
       }
       msg += '\n\nPrima di procedere viene salvata una copia dei dati attuali, così puoi annullare.\n\nConfermi?';
       if (!confirm(msg)) return;
@@ -4405,6 +4523,7 @@ function handleBackupFile(input) {
       if (!snapshotOk && !confirm('⚠️ Non c\'è spazio per salvare la copia di sicurezza sul dispositivo.\n\nPotrai annullare solo finché non chiudi l\'app. Consigliato: annulla e fai prima un backup completo.\n\nProcedere comunque?')) return;
 
       // Applica import
+      let mergeStats = null;
       if (isReplace) {
         // Sostituisce SOLO le categorie presenti nel file: le altre restano intatte
         if (present.dip)    employees = parsedEmps;
@@ -4419,22 +4538,13 @@ function handleBackupFile(input) {
           parsedFields.forEach(f => { const k = f.id || f.key || f.name; if (!fIds.has(k)) customFields.push(f); });
           saveCustomFields();
         }
-        // merge: aggiungi solo ID nuovi
-        const empIds    = new Set(employees.map(e => e.id));
-        const matchIds  = new Set(matches.map(m => m.id));
-        const eventIds  = new Set(events.map(e => e.id));
-        const trashIds  = new Set(trash.map(t => t.id));
-
-        parsedEmps.forEach(e => { if (!empIds.has(e.id)) employees.push(e); });
-        parsedMatches.forEach(m => { if (!matchIds.has(m.id)) matches.push(m); });
-        parsedEvents.forEach(e => { if (!eventIds.has(e.id)) events.push(e); });
-        parsedTrash.forEach(t => { if (!trashIds.has(t.id)) trash.push(t); });
-        if (parsedCalls) {
-          const mIds = new Set(calls.manual.map(x => x.id)), aIds = new Set(calls.archive.map(x => x.id));
-          (parsedCalls.manual || []).forEach(x => { if (!mIds.has(x.id)) calls.manual.push(x); });
-          (parsedCalls.archive || []).forEach(x => { if (!aIds.has(x.id)) calls.archive.push(x); });
-          if (parsedCalls.periodStart && (!calls.periodStart || parsedCalls.periodStart > calls.periodStart)) calls.periodStart = parsedCalls.periodStart;
-        }
+        mergeStats = smartMergeBackup({
+          emps: present.dip ? parsedEmps : null,
+          matches: present.part ? parsedMatches : null,
+          events: present.ev ? parsedEvents : null,
+          trash: present.trash ? parsedTrash : null,
+          calls: present.calls ? parsedCalls : null
+        });
       }
 
       if (!saveAll()) {
@@ -4457,7 +4567,7 @@ function handleBackupFile(input) {
       updateUndoRestoreButton();
 
       const action = isReplace ? 'sostituiti' : 'uniti';
-      alert(`Backup importato! Dati ${action}:\n${lines.join('\n')}\n\nSe qualcosa non va: ⚙ Impostazioni → Backup e ripristino → "Annulla ultimo ripristino".`);
+      alert(`Backup importato! Dati ${action}:\n${mergeStats ? mergeStatsText(mergeStats) : lines.join('\n')}\n\nSe qualcosa non va: ⚙ Impostazioni → Backup e ripristino → "Annulla ultimo ripristino".`);
     } catch(err) {
       alert('Errore nella lettura del file di backup.\n\nDettagli: ' + err.message);
     }
