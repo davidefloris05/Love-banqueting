@@ -486,6 +486,7 @@
       </div>
     </div>
 
+    <div style="text-align:center;font-size:11px;color:#bbb;margin:18px 0 6px">Love Banqueting · versione <span id="app-version"></span></div>
   </div><!-- /settings-view -->
 </div><!-- /app -->
 
@@ -6394,7 +6395,14 @@ async function handleDroppedFiles(files) {
   ov.innerHTML = '<div><div style="font-size:42px">📥</div><strong>Rilascia qui i file</strong><br><span>moduli Word · foto o PDF dei documenti · Excel dei dipendenti</span></div>';
   document.body.appendChild(ov);
   let depth = 0;
-  const hasFiles = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  // Su iPad/iPhone durante il trascinamento i tipi possono essere "Files", "public.jpeg", "image/heic"…
+  // o anche vuoti: accetto tutto tranne il semplice testo trascinato dentro la pagina.
+  const hasFiles = e => {
+    const dt = e.dataTransfer; if (!dt) return false;
+    const t = [...(dt.types || [])];
+    if (!t.length || t.includes('Files')) return true;
+    return !t.every(x => ['text/plain', 'text/html', 'text/uri-list', 'text/x-moz-url'].includes(x));
+  };
   document.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; ov.classList.add('show'); });
   document.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
   document.addEventListener('dragleave', e => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) ov.classList.remove('show'); });
@@ -6403,7 +6411,15 @@ async function handleDroppedFiles(files) {
     e.preventDefault(); depth = 0; ov.classList.remove('show');
     // la zona del vecchio import Excel gestisce già il suo rilascio
     if (e.target.closest && e.target.closest('#drop-zone')) return;
-    handleDroppedFiles([...(e.dataTransfer.files || [])]);
+    let files = [...(e.dataTransfer.files || [])];
+    if (!files.length && e.dataTransfer.items) {
+      files = [...e.dataTransfer.items].filter(it => it.kind === 'file').map(it => it.getAsFile()).filter(Boolean);
+    }
+    if (!files.length) {
+      alert('Ho ricevuto il trascinamento, ma senza file dentro.\n\nProva a trascinarli dall\'app File (non da WhatsApp o Mail), oppure usa il tasto "📥 Moduli e documenti".');
+      return;
+    }
+    handleDroppedFiles(files);
   });
 })();
 
@@ -6412,6 +6428,9 @@ function warmupOcrFiles() {
   ['ocr/tesseract.min.js', 'ocr/worker.min.js', 'ocr/tesseract-core-simd-lstm.wasm.js', 'ocr/tesseract-core-lstm.wasm.js', 'ocr/eng.traineddata.gz', 'ocr/heic2any.min.js']
     .forEach(u => fetch(u).catch(() => {}));
 }
+
+const APP_VERSION = '15 · 28/10/2026';
+document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Init
