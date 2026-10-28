@@ -235,6 +235,19 @@
   .iban-msg.ok { color: #1a6b3c; }
   .iban-msg.warn { color: #b45309; }
   .iban-val { font-family: ui-monospace, Menlo, monospace; letter-spacing: .02em; }
+
+  /* Moduli e documenti */
+  .onb-btn { display: flex; gap: 14px; align-items: flex-start; text-align: left; border: 1px solid #e5e5e5; background: #fff; border-radius: 12px; padding: 14px 16px; cursor: pointer; font-family: inherit; font-size: 14px; color: #1a1a1a; }
+  .onb-btn:hover { border-color: #d81b60; background: #fff5f8; }
+  .onb-btn small { color: #888; font-size: 12px; line-height: 1.4; }
+  .onb-ico { font-size: 26px; line-height: 1; }
+  .di-row { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+  .di-thumb img, .di-thumb .doc-pdf { width: 96px; height: 64px; object-fit: cover; border-radius: 6px; background: #f3f3f3; }
+  .di-fields { flex: 1; min-width: 0; }
+  .di-name { font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .di-ok { color: #1a6b3c; font-weight: 600; }
+  .di-warn { color: #b45309; font-weight: 600; }
+  .di-bad { color: #c0392b; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -316,6 +329,7 @@
         <option value="cameriere">Solo camerieri</option>
         <option value="cuoco">Solo cuochi</option>
       </select>
+      <button class="btn-secondary" onclick="openOnboarding()">📥 Moduli e documenti</button>
       <button class="btn-secondary" onclick="openImportModal()">Importa Excel</button>
       <button class="btn-primary" onclick="openEmpModal()">+ Aggiungi</button>
     </div>
@@ -395,6 +409,16 @@
           <strong>Sostituisci:</strong> rimpiazza solo le categorie contenute nel file; le altre restano come sono.<br>
           Prima di importare vedi cosa contiene il file, e viene salvata una copia per poter annullare (per 3 giorni).
         </div>
+      </div>
+    </div>
+
+    <!-- Sezione Moduli e documenti -->
+    <div class="settings-section">
+      <h2><span class="settings-section-icon">📥</span> Aggiorna dipendenti da moduli e documenti</h2>
+      <p class="settings-section-sub">Carica i moduli Word compilati dai camerieri e le foto dei loro documenti: l'app aggiorna la lista e mette ogni documento nella scheda giusta.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="pickFormsFile()">📄 Carica moduli dati (Word)</button>
+        <button class="btn-primary" onclick="pickDocsFiles()">🪪 Carica foto documenti</button>
       </div>
     </div>
 
@@ -586,6 +610,8 @@
       <div class="field"><label>Comune di nascita</label><input type="text" id="e-citta" /></div>
       <div class="field"><label>Provincia</label><input type="text" id="e-provincia" placeholder="MI" /></div>
       <div class="field full"><label>Nazione di nascita</label><input type="text" id="e-stato" /></div>
+      <div class="field full"><label>Residenza (indirizzo completo)</label><input type="text" id="e-residenza" placeholder="Via, numero, città" /></div>
+      <div class="field full"><label>Codice fiscale</label><input type="text" id="e-cf" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase" /></div>
       <div class="field"><label>Telefono</label><input type="tel" id="e-tel" /></div>
       <div class="field"><label>Email</label><input type="email" id="e-email" /></div>
       <div class="field full"><label>IBAN</label>
@@ -668,6 +694,47 @@
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeModal('callpick-modal')">Annulla</button>
       <button class="btn-primary" id="cp-ok" onclick="confirmCallPick()">Aggiungi chiamata</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Moduli e documenti -->
+<div class="modal-backdrop" id="onboard-modal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title">Moduli e documenti dei camerieri</span>
+      <button class="btn-cancel" onclick="closeModal('onboard-modal')">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+      <button class="onb-btn" onclick="closeModal('onboard-modal');pickFormsFile()">
+        <span class="onb-ico">📄</span><span><strong>Carica moduli dati (Word)</strong><br>
+        <small>I "Modulo dati anagrafici" compilati. Puoi sceglierne tanti insieme: la lista dei dipendenti si aggiorna da sola.</small></span>
+      </button>
+      <button class="onb-btn" onclick="pickDocsFiles()">
+        <span class="onb-ico">🪪</span><span><strong>Carica foto documenti</strong><br>
+        <small>Carta d'identità (fronte e retro), tessera sanitaria… anche tante foto insieme. L'app legge il nome e le mette nella scheda giusta.</small></span>
+      </button>
+      <div style="font-size:11px;color:#aaa">Tutto resta solo su questo dispositivo. La prima volta la lettura delle foto ha bisogno di internet per prepararsi (circa 12 MB), poi funziona anche offline.</div>
+    </div>
+  </div>
+</div>
+<input type="file" id="forms-file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple style="display:none" onchange="handleFormsFiles(this)" />
+<input type="file" id="docs-import-file" accept="image/*,.heic,.heif,application/pdf,.pdf" multiple style="display:none" onchange="handleDocsImportFiles(this)" />
+
+<!-- MODAL: Conferma documenti letti -->
+<div class="modal-backdrop" id="docimport-modal">
+  <div class="modal" style="max-width:620px">
+    <div class="modal-header">
+      <span class="modal-title">Documenti da salvare</span>
+      <button class="btn-cancel" onclick="closeModal('docimport-modal')">✕</button>
+    </div>
+    <div style="padding:16px 20px">
+      <div class="info-box" id="di-status" style="margin-bottom:12px">…</div>
+      <div id="di-list"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('docimport-modal')">Annulla</button>
+      <button class="btn-primary" id="di-save" onclick="saveDocImport()" disabled>Salva nelle schede</button>
     </div>
   </div>
 </div>
@@ -2723,6 +2790,8 @@ const MANSIONI = ['Controllo buffet','Bar','Sbarazzo','Caldi'];
 const FIELD_ALIASES = {
   matricola: { a: ['matricola', 'matr', 'nmatricola', 'badge'], not: [] },
   iban:      { a: ['iban', 'codiceiban', 'contocorrente'], not: [] },
+  residenza: { a: ['residenza', 'indirizzoresidenza', 'indirizzodiresidenza', 'indirizzo'], not: ['mail', 'comune', 'prov', 'cap'] },
+  cf:        { a: ['codicefiscale', 'cf', 'codfiscale'], not: [] },
   cognome:   { a: ['cognome', 'surname', 'lastname'], not: [] },
   nome:      { a: ['nome', 'name', 'firstname'], not: ['cognome', 'surname', 'lastname', 'utente', 'file'] },
   sesso:     { a: ['sesso', 'genere', 'gender', 'sex', 'mf'], not: [] },
@@ -2733,7 +2802,7 @@ const FIELD_ALIASES = {
   email:     { a: ['email', 'mail', 'pec'], not: [] },
   tel:       { a: ['telefono', 'cellulare', 'tel', 'phone', 'cell'], not: [] }
 };
-const IMPORT_FIELDS = ['matricola', 'cognome', 'nome', 'sesso', 'ddn', 'citta', 'provincia', 'stato', 'email', 'tel', 'iban'];
+const IMPORT_FIELDS = ['matricola', 'cognome', 'nome', 'sesso', 'ddn', 'citta', 'provincia', 'stato', 'email', 'tel', 'iban', 'residenza', 'cf'];
 const TRASH_DAYS = 15;
 
 // Lettura sicura: se un dato salvato è rovinato l'app si apre lo stesso,
@@ -3931,6 +4000,8 @@ function renderDipendenti() {
           <div class="dr"><span class="dl">Provincia</span><span class="dv">${e.provincia||'—'}</span></div>
           <div class="dr"><span class="dl">Nazione</span><span class="dv">${e.stato||'—'}</span></div>
           <div class="dr"><span class="dl">Telefono</span><span class="dv">${e.tel||'—'}</span></div>
+          <div class="dr"><span class="dl">Codice fiscale</span><span class="dv iban-val">${e.cf||'—'}</span></div>
+          <div class="dr" style="grid-column:span 2"><span class="dl">Residenza</span><span class="dv">${e.residenza ? escapeHtml(e.residenza) : '—'}</span></div>
           <div class="dr"><span class="dl">Email</span><span class="dv">${e.email ? `<a href="mailto:${escapeHtml(e.email)}" onclick="event.stopPropagation()">${escapeHtml(e.email)}</a>` : '—'}</span></div>
           <div class="dr" style="grid-column:1/-1"><span class="dl">IBAN</span><span class="dv">${e.iban
             ? `<span class="iban-val">${fmtIban(e.iban)}</span> ${ibanValid(e.iban) ? '' : '<span style="color:#b45309;font-size:11px">⚠️ da controllare</span>'}
@@ -3958,7 +4029,7 @@ function openEmpModal(id) {
   editEmpPendingId = id ? null : newId();   // i documenti di un dipendente nuovo si agganciano a questo id
   const e = id ? employees.find(x=>x.id===id) : null;
   document.getElementById('emp-modal-title').textContent = e ? 'Modifica dipendente' : 'Nuovo dipendente';
-  ['nome','cognome','sesso','ddn','citta','provincia','stato','tel','email','docs','note','matricola'].forEach(f => {
+  ['nome','cognome','sesso','ddn','citta','provincia','stato','tel','email','docs','note','matricola','residenza','cf'].forEach(f => {
     document.getElementById('e-'+f).value = e?.[f] || '';
   });
   document.getElementById('e-ruolo').value = empRole(e);
@@ -3997,6 +4068,8 @@ function saveEmp() {
     ruolo:      document.getElementById('e-ruolo').value,
     matricola:  document.getElementById('e-matricola').value.trim(),
     iban:       normIban(document.getElementById('e-iban').value),
+    residenza:  document.getElementById('e-residenza').value.trim(),
+    cf:         document.getElementById('e-cf').value.trim().toUpperCase().replace(/\s/g, ''),
     customData
   };
   if (data.iban && !ibanValid(data.iban) &&
@@ -4106,6 +4179,8 @@ function exportBackup() {
       Ruolo: empRole(e),
       Matricola: e.matricola || '',
       IBAN: e.iban || '',
+      Residenza: e.residenza || '',
+      'Codice fiscale': e.cf || '',
       'Campi extra (JSON)': e.customData ? JSON.stringify(e.customData) : ''
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(empSheet.length ? empSheet : [{}]), 'Dipendenti');
@@ -4323,7 +4398,7 @@ function undoLastRestore() {
 function smartMergeBackup(inc) {
   const st = { empNew: 0, empUpd: 0, matchNew: 0, matchUpd: 0, evNew: 0, evUpd: 0, trashNew: 0, callsNew: 0 };
   const remap = new Map(); // id dipendente nel file → id dipendente su questo dispositivo
-  const empFields = ['nome','cognome','matricola','sesso','ddn','citta','provincia','stato','tel','email','iban','docs','note'];
+  const empFields = ['nome','cognome','matricola','sesso','ddn','citta','provincia','stato','tel','email','iban','residenza','cf','docs','note'];
   const filled = v => String(v ?? '').trim() !== '';
 
   // Dipendenti: stesso id, oppure stesso cognome e nome (con matricola compatibile)
@@ -4506,6 +4581,8 @@ function handleBackupFile(input) {
           ruolo:     String(r.Ruolo || '').trim() === 'cuoco' ? 'cuoco' : 'cameriere',
           matricola: String(r.Matricola || '').trim(),
           iban:      normIban(r.IBAN || ''),
+          residenza: String(r.Residenza || '').trim(),
+          cf:        String(r['Codice fiscale'] || '').trim(),
           customData: (() => { try { return r['Campi extra (JSON)'] ? JSON.parse(r['Campi extra (JSON)']) : {}; } catch (e) { return {}; } })()
         }));
 
@@ -4763,7 +4840,7 @@ function showMappingStep() {
     {key:'cognome',label:'Cognome *'},{key:'nome',label:'Nome *'},{key:'matricola',label:'Matricola'},
     {key:'sesso',label:'Sesso (M/F)'},{key:'ddn',label:'Data di nascita'},
     {key:'citta',label:'Comune di nascita'},{key:'provincia',label:'Provincia di nascita'},
-    {key:'stato',label:'Nazione di nascita'},{key:'email',label:'Email'},{key:'tel',label:'Telefono'},{key:'iban',label:'IBAN'}
+    {key:'stato',label:'Nazione di nascita'},{key:'email',label:'Email'},{key:'tel',label:'Telefono'},{key:'iban',label:'IBAN'},{key:'residenza',label:'Residenza'},{key:'cf',label:'Codice fiscale'}
   ];
   const opts = '<option value="-1">— Non importare —</option>' +
     importHeaders.map((h,i)=>`<option value="${i}">${h}</option>`).join('');
@@ -4798,7 +4875,7 @@ function doImport() {
     const incoming = {
       matricola, sesso, ddn: parseToISO(gv('ddn')),
       citta: gv('citta'), provincia: gv('provincia'), stato: gv('stato'),
-      email: gv('email'), tel: gv('tel'), iban: normIban(gv('iban'))
+      email: gv('email'), tel: gv('tel'), iban: normIban(gv('iban')), residenza: gv('residenza'), cf: gv('cf').toUpperCase().replace(/\s/g, '')
     };
     const r = mergePerson(nome, cognome, incoming);
     const k = personKey(cognome, nome);
@@ -4816,7 +4893,7 @@ function doImport() {
 
 // Unisce una persona importata con quella già presente (stesso cognome e nome):
 // riempie solo i dati che mancano, non cancella né sovrascrive niente.
-function personKey(cognome, nome) { return normName(cognome) + '|' + normName(nome); }
+function personKey(cognome, nome) { return normName(cognome).replace(/[^A-Z]/g, '') + '|' + normName(nome).replace(/[^A-Z]/g, ''); }
 function niceCase(s) { s = String(s).trim().replace(/\s+/g, ' '); return s === s.toUpperCase() ? titleCase(s) : s; }
 function mergePerson(nome, cognome, incoming) {
   const key = personKey(cognome, nome);
@@ -4864,7 +4941,7 @@ function confirmDuplicatePairs(pairs) {
     'Se possono essere due persone diverse premi Annulla: non cambia niente.');
 }
 function mergeDuplicates(pairs) {
-  const fields = ['matricola','sesso','ddn','citta','provincia','stato','tel','email','iban','docs','note'];
+  const fields = ['matricola','sesso','ddn','citta','provincia','stato','tel','email','iban','residenza','cf','docs','note'];
   if (!pairs) pairs = findDuplicatePairs();
   let merged = 0;
   const remap = new Map();
@@ -4899,12 +4976,12 @@ function runMergeDuplicates() {
 // IMPORT MATRICOLE (dal foglio presenze dell'ufficio paghe)
 // ═══════════════════════════════════════════════════════════════════════════
 function normName(s) {
-  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z' ]/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’‘`´]/g, "'").toUpperCase().replace(/[^A-Z' ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 function triggerMatricoleImport() { openImportModal(); }
 
 function titleCase(s) {
-  return String(s).toLowerCase().replace(/(^|[\s'-])(\S)/g, (m, a, b) => a + b.toUpperCase());
+  return String(s).toLowerCase().replace(/(^|[\s'’-])(\S)/g, (m, a, b) => a + b.toUpperCase());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5600,7 +5677,7 @@ document.addEventListener('click', (ev) => {
 // I file restano SOLO su questo dispositivo (memoria interna del browser, IndexedDB):
 // non vanno mai online. Per spostarli su un altro dispositivo si usa il backup.
 
-const DOC_KINDS = ['Carta d\'identità', 'Codice fiscale / Tessera sanitaria', 'Permesso di soggiorno', 'Patente', 'Contratto', 'Altro'];
+const DOC_KINDS = ['Carta d\'identità', 'Carta d\'identità – retro', 'Codice fiscale / Tessera sanitaria', 'Permesso di soggiorno', 'Patente', 'Contratto', 'Altro'];
 const DOC_MAX_PDF_MB = 15;
 let docsCache = [];          // [{id, empId, name, type, kind, size, added, blob, b64}]
 let docsReady = false;
@@ -5716,7 +5793,7 @@ async function addEmpDocs(input) {
     const isImg = (f.type || '').startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name);
     if (!isPdf && !isImg) { alert(`"${f.name}" non è una foto né un PDF: non l'ho aggiunto.`); continue; }
     if (isPdf && f.size > DOC_MAX_PDF_MB * 1024 * 1024) { alert(`"${f.name}" è troppo grande (max ${DOC_MAX_PDF_MB} MB).`); continue; }
-    let blob = isImg ? await compressImage(f) : f;
+    let blob = isImg ? await compressImage(await toUsableImage(f).catch(() => f)) : f;
     const type = isPdf ? 'application/pdf' : (blob.type || f.type || 'image/jpeg');
     let name = f.name || (isPdf ? 'documento.pdf' : 'foto.jpg');
     if (isImg && type === 'image/jpeg') name = name.replace(/\.(heic|heif|png|webp|gif)$/i, '.jpg');
@@ -5924,6 +6001,357 @@ async function remapDocs(remap) {
   if (!moved.length) return;
   moved.forEach(d => { d.empId = remap.get(d.empId); });
   try { await docsPutMany(moved); } catch (e) { console.warn(e); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODULI E DOCUMENTI DEI CAMERIERI (import automatico)
+// ═══════════════════════════════════════════════════════════════════════════
+// 1) Moduli Word "Modulo dati anagrafici camerieri": tabella "voce | valore".
+// 2) Foto/PDF dei documenti: l'app legge il testo (OCR, senza internet) e capisce
+//    di chi è il documento e che tipo è. Tutto resta sul dispositivo.
+
+function openOnboarding() { warmupOcrFiles(); openModal('onboard-modal'); }
+function letters(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z]/g, ''); }
+
+// ─── 1) Moduli Word ─────────────────────────────────────────────────────────
+const FORM_LABELS = {
+  nome: ['nome'], cognome: ['cognome'],
+  ddn: ['datadinascita', 'datanascita', 'natoil', 'natail', 'natoail'],
+  citta: ['luogodinascita', 'luogonascita', 'comunedinascita', 'natoa', 'nataa'],
+  email: ['email', 'mail', 'indirizzoemail', 'posta'],
+  residenza: ['residenza', 'residenzaindirizzocompleto', 'indirizzo', 'indirizzodiresidenza', 'domicilio'],
+  iban: ['iban', 'codiceiban'],
+  tel: ['telefono', 'cellulare', 'numeroditelefono', 'tel', 'cell'],
+  cf: ['codicefiscale', 'cf'],
+  sesso: ['sesso'],
+  stato: ['nazionedinascita', 'statodinascita', 'nazione']
+};
+function formFieldFor(label) {
+  const h = normHeader(label);
+  if (!h) return null;
+  for (const [k, al] of Object.entries(FORM_LABELS)) if (al.includes(h)) return k;
+  for (const [k, al] of Object.entries(FORM_LABELS)) if (al.some(a => a.length > 3 && h.startsWith(a))) return k;
+  return null;
+}
+function docxRead(buf) {
+  const cfb = XLSX.CFB.read(new Uint8Array(buf), { type: 'array' });
+  const entry = XLSX.CFB.find(cfb, '/word/document.xml') || XLSX.CFB.find(cfb, 'word/document.xml');
+  if (!entry) throw new Error('non è un file Word (.docx)');
+  const xml = new TextDecoder('utf-8').decode(entry.content);
+  return new DOMParser().parseFromString(xml, 'application/xml');
+}
+function parseDocxForm(buf) {
+  const doc = docxRead(buf);
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const txt = el => [...el.getElementsByTagNameNS(W, 't')].map(t => t.textContent).join('').replace(/\s+/g, ' ').trim();
+  const out = {};
+  // Tabella voce | valore (anche più colonne: voce, valore, voce, valore…)
+  [...doc.getElementsByTagNameNS(W, 'tr')].forEach(tr => {
+    const cells = [...tr.getElementsByTagNameNS(W, 'tc')].map(txt);
+    for (let i = 0; i + 1 < cells.length; i += 2) {
+      const k = formFieldFor(cells[i]);
+      if (k && cells[i + 1] && !out[k]) out[k] = cells[i + 1];
+    }
+  });
+  // Riserva: righe di testo "Voce: valore"
+  [...doc.getElementsByTagNameNS(W, 'p')].forEach(p => {
+    const m = txt(p).match(/^([^:]{2,40}):\s*(.+)$/);
+    if (m) { const k = formFieldFor(m[1]); if (k && !out[k]) out[k] = m[2].trim(); }
+  });
+  return out;
+}
+function pickFormsFile() { const el = document.getElementById('forms-file'); el.value = ''; el.click(); }
+async function handleFormsFiles(input) {
+  const files = [...(input.files || [])];
+  if (!files.length) return;
+  const results = [], errors = [], conflicts = [];
+  for (const f of files) {
+    try {
+      if (/\.(xlsx|xls|csv)$/i.test(f.name)) { errors.push(`${f.name}: è un Excel, usa "Importa Excel" in Dipendenti`); continue; }
+      const raw = parseDocxForm(await f.arrayBuffer());
+      if (!raw.nome || !raw.cognome) { errors.push(`${f.name}: non ho trovato nome e cognome`); continue; }
+      results.push({ file: f.name, raw });
+    } catch (e) { errors.push(`${f.name}: ${e.message}`); }
+  }
+  let added = 0, completed = 0, same = 0;
+  results.forEach(({ file, raw }) => {
+    const incoming = {
+      ddn: parseToISO(String(raw.ddn || '').replace(/\./g, '/')),
+      citta: niceCase(String(raw.citta || '').replace(/\s*\([A-Z]{2}\)\s*$/i, '')),
+      provincia: (String(raw.citta || '').match(/\(([A-Z]{2})\)\s*$/i) || [])[1] || '',
+      email: String(raw.email || '').trim().toLowerCase(),
+      residenza: String(raw.residenza || '').trim(),
+      iban: normIban(raw.iban),
+      tel: String(raw.tel || '').trim(),
+      cf: String(raw.cf || '').toUpperCase().replace(/\s/g, ''),
+      sesso: /^[MF]/i.test(raw.sesso || '') ? raw.sesso.trim()[0].toUpperCase() : '',
+      stato: niceCase(raw.stato || '')
+    };
+    const before = employees.find(e => personKey(e.cognome, e.nome) === personKey(raw.cognome, raw.nome));
+    if (before) {
+      // dati diversi da quelli già salvati: li raccolgo e chiedo prima di cambiarli
+      Object.entries(incoming).forEach(([k, v]) => {
+        const old = String(before[k] || '').trim();
+        if (!v || !old) return;
+        const a = k === 'iban' ? normIban(old) : k === 'email' ? old.toLowerCase() : old;
+        if (a !== v) conflicts.push({ emp: before, k, old, v, file });
+      });
+    }
+    const r = mergePerson(raw.nome, raw.cognome, incoming);
+    // nomi creati dalle foto (senza apostrofi/spazi, es. "Dellanna"): uso la grafia del modulo
+    if (before) {
+      if (!/['’ ]/.test(before.cognome) && /['’ ]/.test(raw.cognome)) before.cognome = niceCase(raw.cognome);
+      if (!/['’ ]/.test(before.nome) && /['’ ]/.test(raw.nome)) before.nome = niceCase(raw.nome);
+    }
+    if (r === 'added') added++; else if (r === 'completed') completed++; else same++;
+  });
+  const LBL = { ddn: 'data di nascita', citta: 'luogo di nascita', email: 'email', residenza: 'residenza', iban: 'IBAN', tel: 'telefono', cf: 'codice fiscale', sesso: 'sesso', stato: 'nazione', provincia: 'provincia' };
+  let changed = 0;
+  if (conflicts.length) {
+    const list = conflicts.slice(0, 12).map(c => `• ${c.emp.cognome} ${c.emp.nome} – ${LBL[c.k] || c.k}:\n   salvato: ${c.k === 'iban' ? fmtIban(c.old) : c.old}\n   modulo:  ${c.k === 'iban' ? fmtIban(c.v) : c.v}`).join('\n') +
+      (conflicts.length > 12 ? `\n… e altri ${conflicts.length - 12}` : '');
+    if (confirm(`Alcuni moduli hanno dati DIVERSI da quelli che hai già:\n\n${list}\n\nOK = aggiorna con i dati dei moduli\nAnnulla = tieni quelli che hai`)) {
+      conflicts.forEach(c => { c.emp[c.k] = c.v; changed++; });
+    }
+  }
+  saveAll(); renderDipendenti();
+  const badIban = results.filter(r => r.raw.iban && !ibanValid(r.raw.iban)).map(r => `${r.raw.cognome} ${r.raw.nome}`);
+  alert(`Moduli letti: ${results.length} di ${files.length}\n\n• ${added} dipendenti nuovi\n• ${completed} completati con dati nuovi\n• ${same} già a posto` +
+        (changed ? `\n• ${changed} dati aggiornati` : '') +
+        (badIban.length ? `\n\n⚠️ IBAN da controllare (sembra sbagliato): ${badIban.join(', ')}` : '') +
+        (errors.length ? `\n\nNon letti:\n${errors.join('\n')}` : ''));
+}
+
+// ─── 2) Foto dei documenti con lettura automatica ───────────────────────────
+let ocrWorkerPromise = null;
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    if ([...document.scripts].some(s => s.src && s.src.endsWith(src))) { resolve(); return; }
+    const s = document.createElement('script'); s.src = src; s.onload = resolve;
+    s.onerror = () => reject(new Error('non riesco a caricare ' + src + ' (serve internet la prima volta)'));
+    document.head.appendChild(s);
+  });
+}
+function getOcrWorker() {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = loadScriptOnce('ocr/tesseract.min.js').then(() =>
+      Tesseract.createWorker('eng', 1, { workerPath: 'ocr/worker.min.js', corePath: 'ocr/', langPath: 'ocr/', workerBlobURL: false, gzip: true }))
+      .catch(e => { ocrWorkerPromise = null; throw e; });
+  }
+  return ocrWorkerPromise;
+}
+// Le foto iPhone (HEIC): Safari le apre da solo; negli altri browser le converto
+function canDecodeImage(blob) {
+  return new Promise(resolve => {
+    const u = URL.createObjectURL(blob); const im = new Image();
+    im.onload = () => { URL.revokeObjectURL(u); resolve(im.naturalWidth > 0); };
+    im.onerror = () => { URL.revokeObjectURL(u); resolve(false); };
+    im.src = u;
+  });
+}
+async function toUsableImage(file) {
+  const isHeic = /\.(heic|heif)$/i.test(file.name) || /heic|heif/i.test(file.type);
+  if (!isHeic || await canDecodeImage(file)) return file;
+  await loadScriptOnce('ocr/heic2any.min.js');
+  const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+  const b = Array.isArray(out) ? out[0] : out;
+  return new File([b], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+}
+
+// Codice fiscale: primi 11 caratteri (cognome, nome, anno, mese, giorno) per riconoscere il retro
+function cfPart(s, isName) {
+  const L = letters(s), cons = L.replace(/[AEIOU]/g, ''), voc = L.replace(/[^AEIOU]/g, '');
+  if (isName && cons.length >= 4) return cons[0] + cons[2] + cons[3];
+  return (cons + voc + 'XXX').slice(0, 3);
+}
+function cfPrefixes(e) {
+  if (!e.ddn || !/^\d{4}-\d{2}-\d{2}$/.test(e.ddn)) return [];
+  const [y, m, d] = e.ddn.split('-');
+  const base = cfPart(e.cognome, false) + cfPart(e.nome, true) + y.slice(2) + 'ABCDEHLMPRST'[+m - 1];
+  const out = [];
+  if (e.sesso !== 'F') out.push(base + d);
+  if (e.sesso !== 'M') out.push(base + String(+d + 40));
+  return out;
+}
+// "contiene, con al massimo 1 lettera letta male" (l'OCR a volte scambia D con C, O con 0…)
+function fuzzyContains(hay, needle) {
+  if (!needle) return false;
+  if (hay.includes(needle)) return true;
+  if (needle.length < 5) return false;
+  for (let i = 0; i + needle.length <= hay.length; i++) {
+    let miss = 0;
+    for (let j = 0; j < needle.length && miss <= 1; j++) if (hay[i + j] !== needle[j]) miss++;
+    if (miss <= 1) return true;
+  }
+  return false;
+}
+function parseMrzName(text) {
+  // Riga MRZ: COGNOME<<NOME<<<<<  (l'OCR a volte legge i '<' come K o L: li tolgo in fondo)
+  const clean = p => p.replace(/(?:[<KL]{3,}|<).*$/, m => m.startsWith('<') && !/^<[KL<]{2,}/.test(m) && /^<[A-Z]{2,}/.test(m) ? m : '')
+                      .replace(/[<KL]{3,}.*$/, '').replace(/</g, ' ').replace(/\s+/g, ' ').trim();
+  const lines = text.toUpperCase().split('\n').map(l => l.replace(/\s/g, '').replace(/«/g, '<'));
+  for (const l of lines) {
+    const m = l.match(/^([A-Z]{2,}(?:<[A-Z]+)*)<<([A-Z<KL]{2,})/);
+    if (m && !/^(IDITA|CITA|C<ITA|I<ITA)/.test(m[1])) {
+      const cognome = clean(m[1]), nome = clean(m[2]);
+      if (cognome.length >= 2 && nome.length >= 2) return { cognome, nome };
+    }
+  }
+  return null;
+}
+function guessDocKind(text) {
+  const t = letters(text);
+  if (/PERMESSODISOGGIORNO|RESIDENCEPERMIT/.test(t)) return 'Permesso di soggiorno';
+  if (/PATENTE|DRIVINGLICEN/.test(t)) return 'Patente';
+  if (/TESSERASANITARIA|TESSERAEUROPEA|HEALTHINSURANCE/.test(t)) return 'Codice fiscale / Tessera sanitaria';
+  if (/RESIDENZA|RESIDENCE|ESTREMIATTO|FATHERANDMOTHER|FISCALCODE/.test(t) || /<<|C<ITA|I<ITA/.test(text) || parseMrzName(text)) return 'Carta d\'identità – retro';
+  if (/CARTADIIDENTIT|IDENTITYCARD|REPUBBLICAITALIANA/.test(t)) return 'Carta d\'identità';
+  return 'Altro';
+}
+// Trova il dipendente nel testo letto. Restituisce {emp, score, how} o null.
+function matchEmployeeFromText(text, fileName) {
+  const T = letters(text), F = letters(fileName.replace(/\.[a-z0-9]+$/i, ''));
+  const TD = String(text).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const cands = [];
+  employees.forEach(e => {
+    const S = letters(e.cognome), N = letters(String(e.nome).split(/\s+/)[0]);
+    if (!S || !N) return;
+    let score = 0, how = '';
+    if (F && F.includes(S) && F.includes(N)) { score = 5; how = 'dal nome del file'; }
+    if (TD && cfPrefixes(e).some(p => TD.includes(p))) { score = Math.max(score, 5); how = how || 'dal codice fiscale'; }
+    if (T.includes(S + N)) { score = Math.max(score, 5); how = how || 'dalle righe <<< del retro'; }
+    const sOk = fuzzyContains(T, S), nOk = fuzzyContains(T, N);
+    if (sOk && nOk) { score = Math.max(score, 4); how = how || 'dal nome sul documento'; }
+    if (e.ddn) {
+      const [y, m, d] = e.ddn.split('-');
+      if (text.includes(`${d}.${m}.${y}`) || text.includes(`${d}/${m}/${y}`) || TD.includes(y.slice(2) + m + d)) {
+        if (sOk || nOk) { score = Math.max(score, 4) + 1; how = how || 'da nome e data di nascita'; }
+      }
+    }
+    if (!score && S.length >= 5 && fuzzyContains(T, S)) { score = 2; how = 'solo dal cognome'; }
+    if (score) cands.push({ emp: e, score, how });
+  });
+  cands.sort((a, b) => b.score - a.score);
+  if (!cands.length) return null;
+  if (cands.length > 1 && cands[1].score === cands[0].score) return { emp: null, score: 0, how: 'più persone possibili', options: cands.slice(0, 5).map(c => c.emp) };
+  return cands[0].score >= 2 ? cands[0] : null;
+}
+
+let docImportRows = [];
+let docImportNew = new Map(); // persone non in lista lette dai documenti
+function pickDocsFiles() { const el = document.getElementById('docs-import-file'); el.value = ''; el.click(); }
+async function handleDocsImportFiles(input) {
+  const files = [...(input.files || [])];
+  if (!files.length) return;
+  closeModal('onboard-modal');
+  docImportRows = [];
+  docImportNew = new Map();
+  openModal('docimport-modal');
+  const status = document.getElementById('di-status');
+  const listEl = document.getElementById('di-list');
+  listEl.innerHTML = '';
+  document.getElementById('di-save').disabled = true;
+  let worker = null;
+  try { status.textContent = 'Preparo la lettura dei documenti…'; worker = await getOcrWorker(); }
+  catch (e) { status.textContent = '⚠️ Lettura automatica non disponibile (' + e.message + '). Scegli tu la persona per ogni file.'; }
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    status.textContent = `Leggo il documento ${i + 1} di ${files.length}…`;
+    const row = { id: newId(), file: f, name: f.name, blob: null, type: '', text: '', match: null, kind: 'Altro', empChoice: '', newPerson: null };
+    try {
+      const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+      if (isPdf) {
+        row.blob = f; row.type = 'application/pdf';
+      } else {
+        const usable = await toUsableImage(f);
+        row.blob = await compressImage(usable); row.type = row.blob.type || 'image/jpeg';
+        if (worker) { const r = await worker.recognize(row.blob); row.text = r.data.text || ''; }
+      }
+      row.kind = guessDocKind(row.text);
+      row.match = matchEmployeeFromText(row.text, f.name);
+      row.newPerson = parseMrzName(row.text);
+      if (row.newPerson) docImportNew.set(personKey(row.newPerson.cognome, row.newPerson.nome), row.newPerson);
+      row.empChoice = row.match && row.match.emp ? row.match.emp.id
+        : (row.newPerson && !row.match ? 'new:' + personKey(row.newPerson.cognome, row.newPerson.nome) : '');
+    } catch (e) { row.error = e.message; }
+    docImportRows.push(row);
+    renderDocImportRows();
+  }
+  // foto senza persona riconosciuta: provo con le persone nuove lette dalle altre foto
+  docImportRows.filter(r => !r.empChoice && r.text).forEach(r => {
+    const T = letters(r.text);
+    for (const [k, p] of docImportNew) {
+      if (fuzzyContains(T, letters(p.cognome)) && fuzzyContains(T, letters(p.nome.split(' ')[0]))) { r.empChoice = 'new:' + k; r.linkedNew = true; break; }
+    }
+  });
+  renderDocImportRows();
+  status.textContent = `Fatto: ${files.length} file letti. Controlla e premi "Salva".`;
+  document.getElementById('di-save').disabled = false;
+}
+function renderDocImportRows() {
+  const sorted = employees.slice().sort((a, b) => (a.cognome + a.nome).localeCompare(b.cognome + b.nome));
+  document.getElementById('di-list').innerHTML = docImportRows.map(r => {
+    const thumb = r.blob && r.type.startsWith('image/') ? `<img src="${r.thumb || (r.thumb = URL.createObjectURL(r.blob))}" alt="">` : '<span class="doc-pdf">PDF</span>';
+    const sure = r.match && r.match.emp;
+    const state = r.error ? `<span class="di-bad">⚠️ ${escapeHtml(r.error)}</span>`
+      : sure ? `<span class="di-ok">✓ Riconosciuto ${escapeHtml(r.match.how)}</span>`
+      : String(r.empChoice).startsWith('new:') ? `<span class="di-warn">Persona non ancora in lista: verrà creata</span>`
+      : `<span class="di-warn">Non riconosciuto: scegli tu la persona</span>`;
+    const opts = ['<option value="">— scegli la persona —</option>']
+      .concat([...docImportNew].map(([k, p]) => `<option value="new:${k}" ${r.empChoice === 'new:' + k ? 'selected' : ''}>+ Nuovo dipendente: ${escapeHtml(niceCase(p.cognome) + ' ' + niceCase(p.nome))}</option>`))
+      .concat(sorted.map(e => `<option value="${e.id}" ${r.empChoice === e.id ? 'selected' : ''}>${escapeHtml(e.cognome + ' ' + e.nome)}</option>`)).join('');
+    const kinds = DOC_KINDS.map(k => `<option ${r.kind === k ? 'selected' : ''}>${k}</option>`).join('');
+    return `<div class="di-row">
+      <div class="di-thumb">${thumb}</div>
+      <div class="di-fields">
+        <div class="di-name">${escapeHtml(r.name)}</div>
+        <div style="font-size:11.5px;margin:2px 0 6px">${state}</div>
+        <select onchange="docImportSet('${r.id}','empChoice',this.value)" ${r.blob ? '' : 'disabled'}>${opts}</select>
+        <select onchange="docImportSet('${r.id}','kind',this.value)" style="margin-top:6px">${kinds}</select>
+      </div>
+    </div>`;
+  }).join('');
+}
+function docImportSet(id, k, v) { const r = docImportRows.find(x => x.id === id); if (r) r[k] = v; }
+async function saveDocImport() {
+  const ready = docImportRows.filter(r => r.blob && r.empChoice);
+  const skipped = docImportRows.length - ready.length;
+  if (!ready.length) { alert('Scegli la persona per almeno un documento.'); return; }
+  if (skipped && !confirm(`${skipped} file senza persona scelta non verranno salvati.\n\nContinuare?`)) return;
+  const newByKey = new Map();
+  const recs = [];
+  for (const r of ready) {
+    let empId = r.empChoice;
+    if (String(empId).startsWith('new:') && docImportNew.has(empId.slice(4))) {
+      const key = empId.slice(4), np = docImportNew.get(key);
+      let e = employees.find(x => personKey(x.cognome, x.nome) === key) || newByKey.get(key);
+      if (!e) {
+        e = { id: newId(), nome: niceCase(np.nome), cognome: niceCase(np.cognome), sesso: '', ddn: '', citta: '', provincia: '',
+              stato: '', tel: '', email: '', docs: '', note: 'Creato dalla foto del documento. Completare i dati.', ruolo: 'cameriere', matricola: '' };
+        employees.push(e); newByKey.set(key, e);
+      }
+      empId = e.id;
+    }
+    if (docsCache.some(d => d.empId === empId && d.size === r.blob.size)) continue; // già caricato
+    let name = r.name;
+    if (r.type === 'image/jpeg') name = name.replace(/\.(heic|heif|png|webp)$/i, '.jpg');
+    const rec = { id: newId(), empId, name, type: r.type, kind: r.kind, size: r.blob.size, added: Date.now(), blob: r.blob };
+    rec.b64 = await blobToB64(r.blob);
+    recs.push(rec);
+  }
+  try { if (recs.length) { await docsPutMany(recs); docsCache.push(...recs); } }
+  catch (e) { alert('⚠️ Non sono riuscito a salvare i documenti: la memoria potrebbe essere piena.'); return; }
+  saveAll();
+  docImportRows.forEach(r => r.thumb && URL.revokeObjectURL(r.thumb));
+  docImportRows = [];
+  closeModal('docimport-modal');
+  showPage('dipendenti');
+  alert(`✓ ${recs.length} documenti salvati nelle schede dei dipendenti.` + (newByKey.size ? `\n${newByKey.size} dipendenti nuovi creati dalle foto (completa i loro dati).` : ''));
+}
+// Scarica in anticipo i file per la lettura, così poi funziona anche senza internet
+function warmupOcrFiles() {
+  ['ocr/tesseract.min.js', 'ocr/worker.min.js', 'ocr/tesseract-core-simd-lstm.wasm.js', 'ocr/tesseract-core-lstm.wasm.js', 'ocr/eng.traineddata.gz', 'ocr/heic2any.min.js']
+    .forEach(u => fetch(u).catch(() => {}));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
