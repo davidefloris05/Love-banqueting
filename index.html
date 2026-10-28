@@ -262,6 +262,7 @@
 
   .drop-native { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; border: 2.5px dashed #e7a3bd; border-radius: 14px; padding: 26px 16px; background: #fff7fa; cursor: pointer; color: #1a1a1a; }
   .drop-native small { color: #888; font-size: 12px; }
+  .drop-native.drop-page { flex-direction: row; padding: 12px 16px; margin-bottom: 14px; border-width: 2px; font-size: 14px; text-align: left; justify-content: flex-start; }
   .drop-native.over { border-color: #d81b60; background: #ffe6ef; }
   .drop-native input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 </style>
@@ -309,6 +310,11 @@
         <span style="flex:1;font-size:15px;font-weight:600" id="partite-count"></span>
         <button class="btn-primary" onclick="openMatchModal()">+ Nuova partita</button>
       </div>
+      <label class="drop-native drop-page">
+        <span><strong>📥 Trascina qui i PDF delle partite</strong> <small>fatti su un altro dispositivo: la partita si crea con le sue chiamate · oppure tocca per sceglierli</small></span>
+        <input type="file" multiple accept="application/pdf,.pdf" onchange="onPageFileInput(this,'partite')"
+               ondragenter="this.parentNode.classList.add('over')" ondragleave="this.parentNode.classList.remove('over')" ondrop="this.parentNode.classList.remove('over')" />
+      </label>
       <div id="matches-list"></div>
     </div>
 
@@ -326,6 +332,11 @@
         <span style="flex:1;font-size:15px;font-weight:600" id="eventi-count"></span>
         <button class="btn-primary" onclick="openEventModal()">+ Nuovo evento</button>
       </div>
+      <label class="drop-native drop-page">
+        <span><strong>📥 Trascina qui i PDF degli eventi</strong> <small>fatti su un altro dispositivo: l'evento si crea con le sue chiamate · oppure tocca per sceglierli</small></span>
+        <input type="file" multiple accept="application/pdf,.pdf" onchange="onPageFileInput(this,'eventi')"
+               ondragenter="this.parentNode.classList.add('over')" ondragleave="this.parentNode.classList.remove('over')" ondrop="this.parentNode.classList.remove('over')" />
+      </label>
       <div id="events-list"></div>
     </div>
 
@@ -356,6 +367,11 @@
   <!-- PAGE: Chiamate -->
   <div id="page-chiamate" class="page">
     <div id="calls-content"></div>
+    <label class="drop-native drop-page" style="margin-top:16px">
+      <span><strong>📥 Trascina qui i file chiamate</strong> <small>Excel “Chiamate dal … al …” scaricati su un altro dispositivo · oppure tocca per sceglierli</small></span>
+      <input type="file" multiple accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="onPageFileInput(this,'chiamate')"
+             ondragenter="this.parentNode.classList.add('over')" ondragleave="this.parentNode.classList.remove('over')" ondrop="this.parentNode.classList.remove('over')" />
+    </label>
   </div>
   </div><!-- /main-view -->
 
@@ -3566,7 +3582,10 @@ function plainDownload(blob, filename) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-function pdfDownload(doc, filename) {
+function pdfDownload(doc, filename, data) {
+  // Dentro il PDF (invisibile) metto i dati esatti, così caricandolo su un altro dispositivo
+  // la partita/evento si ricrea identica, con le sue chiamate.
+  if (data) { try { doc.setProperties({ title: data.nome, subject: 'Love Banqueting', creator: 'Love Banqueting', keywords: lbEncode(data) }); } catch (e) {} }
   shareOrDownload(doc.output('blob'), filename);
 }
 
@@ -3602,7 +3621,7 @@ function generatePDF() {
   });
 
   pdfFooter(doc);
-  pdfDownload(doc, pdfSafeName(m.nome) + '_' + (m.data || '') + '_camerieri.pdf');
+  pdfDownload(doc, pdfSafeName(m.nome) + '_' + (m.data || '') + '_camerieri.pdf', lbMatchData(m, 'w'));
   markInCalls(m, 'callsW');
   renderBoard();
 }
@@ -3629,7 +3648,7 @@ function generateCooksPDF() {
       { 0: { cellWidth: 110, textColor: PDF_RED }, 1: { textColor: PDF_RED } });
   });
   pdfFooter(doc);
-  pdfDownload(doc, pdfSafeName(m.nome) + '_' + (m.data || '') + '_cuochi.pdf');
+  pdfDownload(doc, pdfSafeName(m.nome) + '_' + (m.data || '') + '_cuochi.pdf', lbMatchData(m, 'c'));
   markInCalls(m, 'callsC');
   renderBoard();
 }
@@ -3668,7 +3687,7 @@ function generateEventPDF() {
   });
 
   pdfFooter(doc);
-  pdfDownload(doc, pdfSafeName(ev.nome) + '_' + (ev.data || '') + '_camerieri.pdf');
+  pdfDownload(doc, pdfSafeName(ev.nome) + '_' + (ev.data || '') + '_camerieri.pdf', lbEventData(ev, 'w'));
   markInCalls(ev, 'callsW');
   renderEventBoard();
 }
@@ -3709,7 +3728,7 @@ function generateEventCooksPDF() {
   pdfTable(doc, y, ['Cognome e nome', 'Orario arrivo'], body,
     { 0: { cellWidth: 110, textColor: PDF_RED }, 1: { textColor: PDF_RED } });
   pdfFooter(doc);
-  pdfDownload(doc, pdfSafeName(ev.nome) + '_' + (ev.data || '') + '_cuochi.pdf');
+  pdfDownload(doc, pdfSafeName(ev.nome) + '_' + (ev.data || '') + '_cuochi.pdf', lbEventData(ev, 'c'));
   markInCalls(ev, 'callsC');
   renderEventBoard();
 }
@@ -6554,7 +6573,7 @@ function formTarget(f) {
 }
 
 function pickDocsFiles() { const el = document.getElementById('docs-import-file'); el.value = ''; el.click(); }
-async function handleDocsImportFiles(input) { return processDocFiles([...(input.files || [])]); }
+async function handleDocsImportFiles(input) { const f = [...(input.files || [])]; input.value = ''; return routeFiles('dipendenti', f); }
 function renderDocImportRows() {
   const sorted = employees.slice().sort((a, b) => (a.cognome + a.nome).localeCompare(b.cognome + b.nome));
   const formRows = docImportRows.filter(r => r.isForm);
@@ -6695,9 +6714,20 @@ async function handleDroppedFiles(files) {
 (function setupDropZone() {
   const ov = document.createElement('div');
   ov.id = 'drop-overlay';
-  ov.innerHTML = '<div><div style="font-size:42px">📥</div><strong>Rilascia qui i file</strong><br><span>moduli Word · foto o PDF dei documenti · Excel dei dipendenti</span><br><span style="font-size:11px">Se non funziona: apri “📥 Moduli e documenti” e rilasciali nel riquadro</span></div>';
+  ov.innerHTML = '<div><div style="font-size:42px">📥</div><strong>Rilascia qui i file</strong><br><span class="ov-what"></span><br><span style="font-size:11px">Se non funziona: rilasciali nel riquadro tratteggiato della pagina</span></div>';
   document.body.appendChild(ov);
   let depth = 0;
+  const OV_TXT = {
+    partite: 'PDF delle partite (camerieri o cuochi)', eventi: 'PDF degli eventi (camerieri o cuochi)',
+    chiamate: 'file chiamate (Excel "Chiamate dal … al …")',
+    dipendenti: 'moduli Word · foto o PDF dei documenti · Excel dei dipendenti'
+  };
+  window.dropPage = () => {
+    if (['onboard-modal', 'emp-modal', 'import-modal'].some(id => { const m = document.getElementById(id); return m && m.classList.contains('open'); })) return 'dipendenti';
+    const p = activePageName();
+    return p === 'impostazioni' ? 'dipendenti' : p;
+  };
+  const setOvText = () => { const sp = ov.querySelector('.ov-what'); if (sp) sp.textContent = OV_TXT[dropPage()] || OV_TXT.dipendenti; };
   // Su iPad/iPhone durante il trascinamento i tipi possono essere "Files", "public.jpeg", "image/heic"…
   // o anche vuoti: accetto tutto tranne il semplice testo trascinato dentro la pagina.
   // Accetto tutto ciò che arriva da FUORI dalla pagina (Finder, app File, Foto…).
@@ -6709,7 +6739,7 @@ async function handleDroppedFiles(files) {
   const onNativeInput = e => !!(e.target && e.target.closest && e.target.closest('input[type=file], .drop-native'));
   const hasFiles = e => !!e.dataTransfer && !internalDrag && !onNativeInput(e);
   // in "cattura" sulla finestra: arrivano prima di qualsiasi altro elemento della pagina
-  window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; ov.classList.add('show'); }, true);
+  window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; setOvText(); ov.classList.add('show'); }, true);
   // NB: non imposto dropEffect: la lista download di Chrome offre i file come "sposta",
   // e chiedere "copia" faceva rifiutare il rilascio in silenzio.
   window.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); ov.classList.add('show'); }, true);
@@ -6728,9 +6758,387 @@ async function handleDroppedFiles(files) {
       alert('Ho ricevuto il trascinamento, ma senza file dentro.\n\nProva a trascinarli dal Finder o dall\'app File (non da WhatsApp, Mail o dall\'anteprima di un altro sito), oppure usa il tasto "📥 Moduli e documenti".\n\n(Dettaglio tecnico: ' + types + ')');
       return;
     }
-    handleDroppedFiles(files);
+    routeFiles(dropPage(), files);
   });
 })();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CARICARE PDF DI PARTITE/EVENTI E FILE CHIAMATE (fatti su un altro dispositivo)
+// ═══════════════════════════════════════════════════════════════════════════
+function lbEncode(o) { return 'LBDATA:' + btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }
+function lbDecode(s) {
+  s = String(s || ''); const i = s.indexOf('LBDATA:');
+  if (i < 0) return null;
+  try { return JSON.parse(decodeURIComponent(escape(atob(s.slice(i + 7).trim())))); } catch (e) { return null; }
+}
+function lbPerson(empId) { const e = employees.find(x => x.id === empId); return e ? { c: e.cognome || '', n: e.nome || '' } : null; }
+function lbMatchData(m, k) {
+  const d = { v: 1, t: 'match', k, nome: m.nome, data: m.data || '', ora: m.ora || '', oraCuochi: m.oraCuochi || '', people: [] };
+  if (k === 'w') (m.staff || []).forEach(s => { const p = lbPerson(s.empId); if (p) d.people.push(Object.assign(p, { z: s.zona, f: s.fascia, m: s.mansione || '' })); });
+  else (m.cooks || []).forEach(c => { const p = lbPerson(c.empId); if (p) d.people.push(Object.assign(p, { z: c.zona })); });
+  return d;
+}
+function lbEventData(ev, k) {
+  const d = { v: 1, t: 'event', k, nome: ev.nome, data: ev.data || '', luogo: ev.luogo || '', note: ev.note || '', oraCuochi: ev.oraCuochi || '', people: [] };
+  if (k === 'w') (ev.staff || []).forEach(s => {
+    const p = lbPerson(s.empId), sl = (ev.slots || []).find(x => x.id === s.slotId);
+    if (p && sl) d.people.push(Object.assign(p, { s: sl.ora, l: sl.label || '' }));
+  });
+  else (ev.cooks || []).forEach(c => { const p = lbPerson(c.empId); if (p) d.people.push(p); });
+  return d;
+}
+
+// Righe di testo di ogni pagina, con i pezzi vicini uniti in "celle" (per leggere le colonne)
+async function lbPdfPages(pdf) {
+  const pages = [];
+  for (let p = 1; p <= Math.min(pdf.numPages, 30); p++) {
+    const tc = await (await pdf.getPage(p)).getTextContent();
+    const rows = [];
+    tc.items.forEach(it => {
+      if (!it.str || !it.str.trim()) return;
+      const y = it.transform[5], x = it.transform[4];
+      let r = rows.find(r => Math.abs(r.y - y) < 3);
+      if (!r) { r = { y, items: [] }; rows.push(r); }
+      r.items.push({ x, w: it.width || 0, s: it.str });
+    });
+    rows.sort((a, b) => b.y - a.y);
+    pages.push(rows.map(r => {
+      const cells = [];
+      r.items.sort((a, b) => a.x - b.x).forEach(it => {
+        const last = cells[cells.length - 1];
+        if (last && it.x - (last.x + last.w) < 4) { last.s += (it.x - (last.x + last.w) > 0.8 ? ' ' : '') + it.s; last.w = it.x + it.w - last.x; }
+        else cells.push({ x: it.x, w: it.w, s: it.s });
+      });
+      cells.forEach(c => { c.s = c.s.replace(/\s+/g, ' ').trim(); });
+      return { cells, t: cells.map(c => c.s).join(' ').replace(/\s+/g, ' ').trim() };
+    }));
+  }
+  return pages;
+}
+// Ogni cella va sotto la colonna d'intestazione più vicina a sinistra
+function lbByColumns(head, row) {
+  const out = head.map(() => '');
+  row.cells.forEach(c => {
+    let k = 0;
+    head.forEach((h, i) => { if (h.x <= c.x + 3) k = i; });
+    out[k] = (out[k] + ' ' + c.s).trim();
+  });
+  return out;
+}
+// PDF fatti prima di questa versione: li leggo dal testo
+function lbParseOldPdf(pages) {
+  const rows = [];
+  pages.forEach(pg => { for (const r of pg) { if (/^LOVE BANQUETING SAS/i.test(r.t)) break; rows.push(r); } });
+  let si = rows.findIndex(r => /Calcio d.inizio/i.test(r.t)), t = 'match';
+  if (si < 0) { si = rows.findIndex(r => /^(Camerieri|Cucina)$/i.test(r.t)); t = 'event'; }
+  if (si < 1) return null;
+  const nome = niceCase(rows.slice(0, si).map(r => r.t).join(' '));
+  const d = { v: 0, t, k: /Cucina\s*$/i.test(rows[si].t) ? 'c' : 'w', nome, data: '', ora: '', luogo: '', note: '', oraCuochi: '', people: [] };
+  if (t === 'match') {
+    const m = rows[si].t.match(/(\d{1,2}\/\d{1,2}\/\d{4}).*?inizio:\s*(\d{1,2}:\d{2})/i);
+    if (!m) return null;
+    d.data = parseToISO(m[1]); d.ora = m[2].padStart(5, '0');
+  }
+  let i = si + 1;
+  // riquadro informazioni: una riga di titoli e una di valori
+  if (rows[i] && rows[i + 1] && rows[i].t === rows[i].t.toUpperCase() && !/\(\d+\)$/.test(rows[i].t)) {
+    const head = rows[i].cells, vals = lbByColumns(head, rows[i + 1]);
+    head.forEach((h, k) => {
+      const lab = h.s.toUpperCase(), v = vals[k];
+      if (lab === 'QUANDO' || (lab === 'DATA' && !d.data)) d.data = parseToISO(v) || d.data;
+      if (lab === 'DOVE' && v !== '-') d.luogo = v;
+      if (lab === 'ARRIVO CUOCHI') d.oraCuochi = v;
+    });
+    i += 2;
+  }
+  if (rows[i] && /^Note:/i.test(rows[i].t)) {
+    const n = [];
+    while (rows[i] && !/\(\d+\)$/.test(rows[i].t) && !/^Cognome e nome/i.test(rows[i].t)) { n.push(rows[i].t); i++; }
+    d.note = n.join(' ').replace(/^Note:\s*/i, '');
+  }
+  let sec = null, head = null;
+  const o = d.ora ? getOrari(d.ora) : null;
+  for (; i < rows.length; i++) {
+    const r = rows[i];
+    if (/^Cognome e nome/i.test(r.t)) { head = r.cells; continue; }
+    const st = r.t.match(/^(.*?)\s*\((\d+)\)$/);
+    if (st && (!head || r.cells.length <= 3)) {
+      const title = st[1].trim();
+      if (t === 'match') sec = { z: ZONES.find(z => z.toUpperCase() === title.toUpperCase()) || niceCase(title) };
+      else if (d.k === 'w') {
+        const m = title.match(/^(\d{1,2}:\d{2})\s*(?:-\s*(.*))?$/);
+        sec = m ? { s: m[1].padStart(5, '0'), l: m[2] ? niceCase(m[2].trim()) : '' } : null;
+      } else sec = {};
+      head = null;
+      continue;
+    }
+    if (!head || !sec) continue;
+    const v = lbByColumns(head, r);
+    if (!v[0]) continue;
+    const p = { full: v[0] };
+    if (t === 'match' && d.k === 'w') {
+      const time = (v[1] || '').trim();
+      p.f = /mattina/i.test(time) ? 'prep' : (o && time === o.h4 ? '4h' : '25h');
+      p.m = v[2] && v[2] !== '-' ? v[2] : '';
+    }
+    if (t === 'event' && d.k === 'c' && !d.oraCuochi && v[1]) d.oraCuochi = v[1];
+    d.people.push(Object.assign(p, sec));
+  }
+  return d.nome && d.data ? d : null;
+}
+// Legge un PDF dell'app: { data } oppure null se non è un PDF di partita/evento
+async function readLbPdf(file) {
+  const lib = await loadPdfJs();
+  const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  try {
+    const md = await pdf.getMetadata();
+    const d = lbDecode(md && md.info && md.info.Keywords);
+    if (d && (d.t === 'match' || d.t === 'event')) return d;
+  } catch (e) {}
+  try { return lbParseOldPdf(await lbPdfPages(pdf)); } catch (e) { return null; }
+}
+
+function lbNewEmp(cognome, nome, ruolo, extra) {
+  const e = Object.assign({ id: newId(), nome: niceCase(nome), cognome: niceCase(cognome),
+    sesso: '', ddn: '', citta: '', provincia: '', stato: '', tel: '', email: '', docs: '', note: '',
+    ruolo, matricola: '' }, extra || {});
+  employees.push(e);
+  return e;
+}
+// Trova la persona (stesso cognome e nome) o la aggiunge ai dipendenti
+function lbFindEmp(p, ruolo, created) {
+  let e;
+  if (p.c !== undefined) {
+    const k = personKey(p.c, p.n);
+    e = employees.find(x => personKey(x.cognome, x.nome) === k);
+    if (!e) { e = lbNewEmp(p.c, p.n, ruolo); created.push(e); }
+    return e;
+  }
+  const L = letters(p.full);
+  e = employees.find(x => letters(x.cognome + x.nome) === L) || employees.find(x => letters(x.nome + x.cognome) === L);
+  if (!e) {
+    const w = niceCase(p.full).split(' ');
+    const n = w.length > 1 ? w.pop() : '';
+    e = lbNewEmp(w.join(' '), n, ruolo); created.push(e);
+  }
+  return e;
+}
+// Applica i dati di un PDF: crea o aggiorna la partita/evento, il PDF è la versione finale
+function lbApplyPdf(d, created, batchNew) {
+  const isM = d.t === 'match', list = isM ? matches : events, L = letters(d.nome);
+  let obj = list.find(x => x.data === d.data && letters(x.nome) === L);
+  if (!obj && isM) { const same = matches.filter(x => x.data === d.data); if (same.length === 1) obj = same[0]; }
+  let isNew = false;
+  if (!obj) {
+    isNew = true;
+    obj = isM ? { id: newId(), nome: d.nome, data: d.data, ora: d.ora || '', staff: [], oraCuochi: '', cooks: [] }
+              : { id: newId(), nome: d.nome, data: d.data, luogo: d.luogo || '', note: d.note || '', slots: [], staff: [], oraCuochi: '', cooks: [] };
+    list.push(obj);
+    if (batchNew) batchNew.add(obj.id);
+  } else if (batchNew && batchNew.has(obj.id)) isNew = true; // creata poco fa da un altro PDF dello stesso gruppo
+  if (isM && !obj.ora && d.ora) obj.ora = d.ora;
+  if (!isM) { if (!obj.luogo && d.luogo) obj.luogo = d.luogo; if (!obj.note && d.note) obj.note = d.note; if (!obj.slots) obj.slots = []; }
+  const ruolo = d.k === 'c' ? 'cuoco' : 'cameriere';
+  const key = d.k === 'c' ? 'cooks' : 'staff';
+  const old = obj[key] || [];
+  const sig = arr => arr.map(x => [x.empId, x.zona || '', x.fascia || '', x.mansione || '', x.slotId || ''].join('|')).sort().join(';');
+  const next = [];
+  d.people.forEach(p => {
+    const e = lbFindEmp(p, ruolo, created);
+    let row;
+    if (d.k === 'c') row = isM ? { empId: e.id, zona: p.z || '' } : { empId: e.id };
+    else if (isM) row = { empId: e.id, zona: p.z || '', fascia: ['prep', '4h', '25h'].includes(p.f) ? p.f : '25h', mansione: p.m || '' };
+    else {
+      const LL = letters(p.l || '');
+      let sl = obj.slots.find(x => x.ora === p.s && letters(x.label || '') === LL) ||
+               (obj.slots.filter(x => x.ora === p.s).length === 1 ? obj.slots.find(x => x.ora === p.s) : null);
+      if (!sl) { sl = { id: newId(), ora: p.s, label: p.l || '' }; obj.slots.push(sl); }
+      row = { empId: e.id, slotId: sl.id };
+    }
+    if (next.some(x => x.empId === row.empId && (x.slotId || '') === (row.slotId || ''))) return; // niente doppioni
+    const prev = old.find(x => x.empId === row.empId && (!row.slotId || x.slotId === row.slotId));
+    next.push(Object.assign({ id: prev ? prev.id : newId() }, row));
+  });
+  const changed = sig(old) !== sig(next) || (d.oraCuochi && d.k === 'c' && obj.oraCuochi !== d.oraCuochi);
+  const added = next.filter(x => !old.some(o => o.empId === x.empId)).length;
+  const removed = old.filter(o => !next.some(x => x.empId === o.empId)).length;
+  obj[key] = next;
+  if (d.k === 'c' && d.oraCuochi) obj.oraCuochi = d.oraCuochi;
+  const flag = d.k === 'c' ? 'callsC' : 'callsW';
+  const callsNew = !obj[flag];
+  obj[flag] = true;
+  const what = (isM ? 'partita ' : 'evento ') + d.nome + ' (' + fmtDate(d.data) + ') – ' + (d.k === 'c' ? 'cuochi' : 'camerieri');
+  const status = isNew ? 'NUOVO' : (changed ? 'AGGIORNATO' : (callsNew ? 'CHIAMATE' : 'UGUALE'));
+  let line = isNew ? `• Nuov${isM ? 'a' : 'o'} ${what}: ${plural(next.length, 'persona', 'persone')}`
+          : changed ? `• Aggiornat${isM ? 'a' : 'o'} ${what}` + (added || removed ? ` (${added ? '+' + added : ''}${added && removed ? ', ' : ''}${removed ? '−' + removed : ''})` : '')
+          : `• Già uguale: ${what}` + (callsNew ? ' (aggiunte le chiamate)' : '');
+  if (calls.periodStart && d.data < calls.periodStart && (isNew || changed || callsNew)) line += '\n   ⚠ giorno già dentro un file chiamate scaricato';
+  return { status, line, obj, isM };
+}
+
+async function importLbPdfs(files, page) {
+  const datas = [], wrong = [], bad = [];
+  for (const f of files) {
+    let d = null;
+    try { d = await readLbPdf(f); } catch (e) { d = null; }
+    if (!d) { bad.push(f.name); continue; }
+    if ((page === 'partite') !== (d.t === 'match')) { wrong.push({ f, d }); continue; }
+    datas.push({ f, d });
+  }
+  const msgs = [];
+  if (wrong.length) msgs.push(wrong.map(w => `"${w.f.name}" è il PDF di ${w.d.t === 'match' ? 'una partita: caricalo nella pagina Partite' : 'un evento: caricalo nella pagina Eventi'}.`).join('\n'));
+  if (bad.length) msgs.push(`Non ${bad.length === 1 ? 'è un PDF' : 'sono PDF'} di ${page === 'partite' ? 'partite' : 'eventi'} fatti con l'app:\n${bad.map(n => '• ' + n).join('\n')}` +
+    `\n\nQui puoi caricare solo i PDF ${page === 'partite' ? 'delle partite' : 'degli eventi'} (camerieri o cuochi). Moduli e documenti vanno nella pagina Dipendenti.`);
+  if (!datas.length) { if (msgs.length) alert(msgs.join('\n\n')); return; }
+  // provo, mostro cosa cambia e chiedo conferma (Annulla = tutto come prima)
+  const snap = JSON.stringify({ employees, matches, events });
+  const created = [], batchNew = new Set(), res = datas.map(x => lbApplyPdf(x.d, created, batchNew));
+  const changes = res.filter(r => r.status !== 'UGUALE').length;
+  let txt = res.map(r => r.line).join('\n');
+  if (created.length) txt += `\n\nNuov${created.length === 1 ? 'o dipendente' : 'i dipendenti'} da aggiungere: ` + created.map(e => `${e.cognome} ${e.nome}`).join(', ');
+  if (changes) txt += '\n\nLe chiamate di questi giorni vengono segnate da sole.';
+  if (msgs.length) txt += '\n\n' + msgs.join('\n\n');
+  if (!changes && !created.length) { alert('Niente da cambiare:\n\n' + txt); return; }
+  if (!confirm(txt + '\n\nConfermi?')) { const o = JSON.parse(snap); employees = o.employees; matches = o.matches; events = o.events; return; }
+  saveAll();
+  if (page === 'partite') {
+    if (currentMatchId && document.getElementById('partita-board-view').style.display !== 'none') renderBoard(); else renderMatches();
+  } else {
+    if (currentEventId && document.getElementById('evento-board-view').style.display !== 'none') renderEventBoard(); else renderEvents();
+  }
+}
+
+// ─── File chiamate (Excel "Chiamate dal … al …") ────────────────────────────
+function lbReadCallsWorkbook(wb, fileName) {
+  const rows = [];
+  let isCalls = false;
+  wb.SheetNames.forEach(sn => {
+    const ws = wb.Sheets[sn];
+    const cell = (r, c) => { const x = ws[XLSX.utils.encode_cell({ r, c })]; return x ? x.v : ''; };
+    const head = String(cell(1, 1)).toUpperCase().includes('FOGLIO PRESENZE') || /^matr/i.test(String(cell(4, 0)).trim());
+    if (!head) return;
+    // mese e anno: dal nome del foglio ("Novembre 2026") o dalla data in B3
+    let y, m;
+    const nm = sn.toLowerCase().match(/([a-z]+)\s+(\d{4})/);
+    if (nm && MESI.indexOf(nm[1]) >= 0) { m = MESI.indexOf(nm[1]) + 1; y = +nm[2]; }
+    else if (typeof cell(2, 1) === 'number') { const dt = new Date(Date.UTC(1899, 11, 30) + cell(2, 1) * 86400000); y = dt.getUTCFullYear(); m = dt.getUTCMonth() + 1; }
+    if (!y) return;
+    isCalls = true;
+    const dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    for (let r = 6; r <= range.e.r; r++) {
+      const cognome = String(cell(r, 1) || '').trim(), nome = String(cell(r, 2) || '').trim();
+      if (!cognome && !nome) continue;
+      const matricola = String(cell(r, 0) || '').trim();
+      for (let d = 1; d <= dim; d++) {
+        if (String(cell(r, 3 + d)).trim().toLowerCase() === 'x')
+          rows.push({ cognome, nome, matricola, date: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` });
+      }
+    }
+  });
+  if (!isCalls) return null;
+  const name = String(fileName || '').replace(/\.(xlsx|xls)$/i, '').replace(/\s*\(\d+\)$/, '').trim() || 'Chiamate';
+  const dates = rows.map(r => r.date).sort();
+  let from = dates[0], to = dates[dates.length - 1];
+  // il periodo vero è scritto nel nome: "Chiamate dal 1 al 15 nov", "dal 20 ott al 5 nov", "dal 28 dic 2026 al 3 gen 2027"
+  const mm = name.toLowerCase().match(/dal (\d{1,2})(?: ([a-z]{3}))?(?: (\d{4}))? al (\d{1,2}) ([a-z]{3})(?: (\d{4}))?/);
+  if (mm && dates.length) {
+    const mb = x => MESI_BREVI.indexOf(x) + 1;
+    const m2 = mb(mm[5]), m1 = mm[2] ? mb(mm[2]) : m2;
+    if (m1 && m2) {
+      const y2 = mm[6] ? +mm[6] : +to.slice(0, 4), y1 = mm[3] ? +mm[3] : (m1 > m2 ? y2 - 1 : y2);
+      const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const f = iso(y1, m1, +mm[1]), t = iso(y2, m2, +mm[4]);
+      if (f <= from && t >= to) { from = f; to = t; }
+    }
+  }
+  return { name, from, to, rows };
+}
+async function importCallsFiles(files) {
+  const xl = files.filter(f => fileKind(f) === 'excel');
+  const other = files.filter(f => fileKind(f) !== 'excel');
+  const msgs = [];
+  if (other.length) msgs.push(`Qui puoi caricare solo i file chiamate (Excel "Chiamate dal … al …"):\n${other.map(f => '• ' + f.name).join('\n')}\n\nI PDF vanno nelle pagine Partite o Eventi, moduli e documenti nella pagina Dipendenti.`);
+  const parsed = [];
+  for (const f of xl) {
+    try {
+      const wb = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: 'array' });
+      const p = lbReadCallsWorkbook(wb, f.name);
+      if (p && p.rows.length) parsed.push(p);
+      else msgs.push(`"${f.name}" non è un file chiamate${p ? ' (non ci sono X dentro)' : ': se è l\'elenco dei dipendenti, caricalo nella pagina Dipendenti'}.`);
+    } catch (e) { msgs.push(`"${f.name}" non si riesce ad aprire.`); }
+  }
+  if (!parsed.length) { if (msgs.length) alert(msgs.join('\n\n')); return; }
+  const snap = JSON.stringify({ employees, calls });
+  const created = [], lines = [];
+  parsed.sort((a, b) => a.to.localeCompare(b.to)).forEach(p => {
+    const rows = [];
+    p.rows.forEach(r => {
+      let e = r.matricola ? employees.find(x => String(x.matricola || '').trim() === r.matricola) : null;
+      if (!e) { const k = personKey(r.cognome, r.nome); e = employees.find(x => personKey(x.cognome, x.nome) === k); }
+      if (!e) { e = lbNewEmp(r.cognome, r.nome, 'cameriere', { matricola: r.matricola }); created.push(e); }
+      else if (r.matricola && !e.matricola) e.matricola = r.matricola;
+      if (!rows.some(x => x.empId === e.id && x.date === r.date))
+        rows.push({ empId: e.id, date: r.date, cognome: e.cognome, nome: e.nome, matricola: e.matricola || '' });
+    });
+    const ex = calls.archive.find(a => a.from === p.from && a.to === p.to);
+    const nPeople = new Set(rows.map(r => r.empId)).size;
+    if (ex) { ex.rows = rows; lines.push(`• "${p.name}" era già salvato: aggiornato (${plural(rows.length, 'chiamata', 'chiamate')} · ${plural(nPeople, 'persona', 'persone')})`); }
+    else {
+      calls.archive.push({ id: newId(), from: p.from, to: p.to, name: p.name, createdAt: new Date().toISOString(), prevStart: calls.periodStart || null, rows });
+      lines.push(`• "${p.name}": ${plural(rows.length, 'chiamata', 'chiamate')} · ${plural(nPeople, 'persona', 'persone')}`);
+    }
+    // il periodo del file è già stato mandato: qui il periodo aperto riparte dal giorno dopo
+    const after = isoAddDays(p.to, 1);
+    if (!calls.periodStart || calls.periodStart < after) calls.periodStart = after;
+  });
+  let txt = 'File chiamate da salvare:\n' + lines.join('\n') +
+    `\n\nIl periodo aperto ripartirà dal ${fmtDate(calls.periodStart)}.`;
+  if (created.length) txt += `\n\nNuov${created.length === 1 ? 'o dipendente' : 'i dipendenti'} da aggiungere: ` + created.map(e => `${e.cognome} ${e.nome}`).join(', ');
+  if (msgs.length) txt += '\n\n' + msgs.join('\n\n');
+  if (!confirm(txt + '\n\nConfermi?')) { const o = JSON.parse(snap); employees = o.employees; calls = o.calls; return; }
+  saveAll(); renderCalls(); renderCallsArchiveSettings();
+}
+
+// ─── Ogni pagina accetta solo i suoi file ───────────────────────────────────
+function activePageName() {
+  if (document.getElementById('settings-view').classList.contains('active')) return 'impostazioni';
+  const p = document.querySelector('.page.active');
+  return p ? p.id.replace('page-', '') : 'partite';
+}
+function isPdfFile(f) { return f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''); }
+async function routeFiles(page, files) {
+  files = [...files].filter(Boolean);
+  if (!files.length) return;
+  if (page === 'partite' || page === 'eventi') {
+    const pdfs = files.filter(isPdfFile), rest = files.filter(f => !isPdfFile(f));
+    if (rest.length && !pdfs.length) {
+      alert(`Nella pagina ${page === 'partite' ? 'Partite' : 'Eventi'} puoi caricare solo i PDF ${page === 'partite' ? 'delle partite' : 'degli eventi'} fatti con l'app.\n\n` +
+        rest.map(f => '• ' + f.name).join('\n') + '\n\nModuli, documenti ed elenco dipendenti → pagina Dipendenti. File chiamate → pagina Chiamate.');
+      return;
+    }
+    if (rest.length) alert('Questi file non sono PDF e li salto:\n' + rest.map(f => '• ' + f.name).join('\n'));
+    return importLbPdfs(pdfs, page);
+  }
+  if (page === 'chiamate') return importCallsFiles(files);
+  // Dipendenti (e finestre dei documenti): i PDF di partite/eventi non vanno qui
+  const keep = [], wrong = [];
+  for (const f of files) {
+    if (isPdfFile(f)) {
+      let d = null;
+      try { d = await readLbPdf(f); } catch (e) {}
+      if (d) { wrong.push(`• ${f.name} → pagina ${d.t === 'match' ? 'Partite' : 'Eventi'}`); continue; }
+    }
+    keep.push(f);
+  }
+  if (wrong.length) alert('Questi sono PDF di partite/eventi: caricali nella loro pagina.\n\n' + wrong.join('\n'));
+  if (keep.length) return handleDroppedFiles(keep);
+}
+async function onPageFileInput(input, page) {
+  const files = [...(input.files || [])];
+  input.value = '';
+  await routeFiles(page, files);
+}
 
 // Scarica in anticipo i file per la lettura, così poi funziona anche senza internet
 function warmupOcrFiles() {
@@ -6739,7 +7147,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '19 · 28/10/2026';
+const APP_VERSION = '20 · 28/10/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
