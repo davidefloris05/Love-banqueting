@@ -6691,12 +6691,15 @@ async function handleDroppedFiles(files) {
   // Accetto tutto ciò che arriva da FUORI dalla pagina (Finder, app File, Foto…).
   // Ignoro solo i trascinamenti che partono dalla pagina stessa (testo o immagini dell'app).
   let internalDrag = false;
-  document.addEventListener('dragstart', () => { internalDrag = true; }, true);
+  let internalTimer = null;
+  document.addEventListener('dragstart', () => { internalDrag = true; clearTimeout(internalTimer); internalTimer = setTimeout(() => { internalDrag = false; }, 15000); }, true);
   document.addEventListener('dragend', () => { internalDrag = false; }, true);
   const hasFiles = e => !!e.dataTransfer && !internalDrag;
   // in "cattura" sulla finestra: arrivano prima di qualsiasi altro elemento della pagina
   window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; ov.classList.add('show'); }, true);
-  window.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {} ov.classList.add('show'); }, true);
+  // NB: non imposto dropEffect: la lista download di Chrome offre i file come "sposta",
+  // e chiedere "copia" faceva rifiutare il rilascio in silenzio.
+  window.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); ov.classList.add('show'); }, true);
   window.addEventListener('dragleave', e => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth || !e.relatedTarget) ov.classList.remove('show'); }, true);
   window.addEventListener('drop', e => {
     if (!hasFiles(e)) { internalDrag = false; return; }
@@ -6723,7 +6726,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '17 · 28/10/2026';
+const APP_VERSION = '18 · 28/10/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
