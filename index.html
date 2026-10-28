@@ -259,6 +259,11 @@
   .di-f input { height: 32px; font-size: 13px; text-transform: none; letter-spacing: 0; color: #1a1a1a; font-weight: 400; }
   .di-formrow { background: #fffaf3; border-radius: 10px; padding: 10px; margin: 6px 0; border-bottom: none; }
   .di-row .di-thumb img, .di-row .di-thumb .doc-pdf { width: 96px; height: auto; max-height: 130px; object-fit: contain; background: #f3f3f3; }
+
+  .drop-native { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; border: 2.5px dashed #e7a3bd; border-radius: 14px; padding: 26px 16px; background: #fff7fa; cursor: pointer; color: #1a1a1a; }
+  .drop-native small { color: #888; font-size: 12px; }
+  .drop-native.over { border-color: #d81b60; background: #ffe6ef; }
+  .drop-native input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -721,7 +726,14 @@
         <span class="onb-ico">📥</span><span><strong>Carica moduli e documenti</strong><br>
         <small>Word, PDF o foto, anche tutti insieme e mescolati. L'app capisce da sola cosa sono: i moduli dati aggiornano la lista dei dipendenti, i documenti (carta d'identità, tessera sanitaria…) vanno nella scheda giusta.</small></span>
       </button>
-      <div class="info-box" style="margin:0">💡 <strong>Più veloce:</strong> trascina i file direttamente sulla pagina, anche moduli e foto insieme. Su iPad: apri l'app File o Foto affiancata, tieni premuto sui file e trascinali qui.</div>
+      <label class="drop-native" id="drop-native">
+        <span style="font-size:34px;line-height:1">📥</span>
+        <strong>Trascina qui i file</strong>
+        <small>Word, PDF o foto, anche tanti insieme · oppure tocca qui per sceglierli</small>
+        <input type="file" multiple accept="image/*,.heic,.heif,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+               onchange="handleDocsImportFiles(this)" ondragenter="this.parentNode.classList.add('over')" ondragleave="this.parentNode.classList.remove('over')" ondrop="this.parentNode.classList.remove('over')" />
+      </label>
+      <div style="font-size:11px;color:#999">Su iPad: apri l'app File o Foto affiancata, tieni premuto sui file e trascinali nel riquadro.</div>
       <div style="font-size:11px;color:#aaa">Tutto resta solo su questo dispositivo. La prima volta la lettura delle foto ha bisogno di internet per prepararsi (circa 12 MB), poi funziona anche offline.</div>
     </div>
   </div>
@@ -6683,7 +6695,7 @@ async function handleDroppedFiles(files) {
 (function setupDropZone() {
   const ov = document.createElement('div');
   ov.id = 'drop-overlay';
-  ov.innerHTML = '<div><div style="font-size:42px">📥</div><strong>Rilascia qui i file</strong><br><span>moduli Word · foto o PDF dei documenti · Excel dei dipendenti</span></div>';
+  ov.innerHTML = '<div><div style="font-size:42px">📥</div><strong>Rilascia qui i file</strong><br><span>moduli Word · foto o PDF dei documenti · Excel dei dipendenti</span><br><span style="font-size:11px">Se non funziona: apri “📥 Moduli e documenti” e rilasciali nel riquadro</span></div>';
   document.body.appendChild(ov);
   let depth = 0;
   // Su iPad/iPhone durante il trascinamento i tipi possono essere "Files", "public.jpeg", "image/heic"…
@@ -6694,7 +6706,8 @@ async function handleDroppedFiles(files) {
   let internalTimer = null;
   document.addEventListener('dragstart', () => { internalDrag = true; clearTimeout(internalTimer); internalTimer = setTimeout(() => { internalDrag = false; }, 15000); }, true);
   document.addEventListener('dragend', () => { internalDrag = false; }, true);
-  const hasFiles = e => !!e.dataTransfer && !internalDrag;
+  const onNativeInput = e => !!(e.target && e.target.closest && e.target.closest('input[type=file], .drop-native'));
+  const hasFiles = e => !!e.dataTransfer && !internalDrag && !onNativeInput(e);
   // in "cattura" sulla finestra: arrivano prima di qualsiasi altro elemento della pagina
   window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; ov.classList.add('show'); }, true);
   // NB: non imposto dropEffect: la lista download di Chrome offre i file come "sposta",
@@ -6726,7 +6739,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '18 · 28/10/2026';
+const APP_VERSION = '19 · 28/10/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
