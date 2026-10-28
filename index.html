@@ -248,6 +248,11 @@
   .di-ok { color: #1a6b3c; font-weight: 600; }
   .di-warn { color: #b45309; font-weight: 600; }
   .di-bad { color: #c0392b; font-weight: 600; }
+
+  #drop-overlay { position: fixed; inset: 0; z-index: 2000; display: none; align-items: center; justify-content: center; background: rgba(216,27,96,.10); border: 3px dashed #d81b60; pointer-events: none; }
+  #drop-overlay.show { display: flex; }
+  #drop-overlay > div { background: #fff; border-radius: 16px; padding: 24px 30px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.15); font-size: 16px; }
+  #drop-overlay span { font-size: 12px; color: #888; }
 </style>
 </head>
 <body>
@@ -626,7 +631,7 @@
           <button type="button" class="btn-secondary" onclick="pickEmpDoc()">+ Aggiungi foto o PDF</button>
         </div>
         <input type="file" id="e-docfile-input" accept="image/*,application/pdf,.pdf" multiple style="display:none" onchange="addEmpDocs(this)" />
-        <div style="font-size:11px;color:#aaa;margin-top:6px">I documenti restano solo su questo dispositivo (non vanno online). Per spostarli usa il backup.</div>
+        <div style="font-size:11px;color:#aaa;margin-top:6px">Puoi anche trascinare qui le foto o i PDF. I documenti restano solo su questo dispositivo (non vanno online). Per spostarli usa il backup.</div>
       </div>
       <div class="field full"><label>Note sui documenti</label><textarea id="e-docs" rows="2" placeholder="Es. carta d'identità scade il 03/2028"></textarea></div>
       <div class="field full"><label>Note</label><textarea id="e-note" rows="2"></textarea></div>
@@ -714,6 +719,7 @@
         <span class="onb-ico">🪪</span><span><strong>Carica foto documenti</strong><br>
         <small>Carta d'identità (fronte e retro), tessera sanitaria… anche tante foto insieme. L'app legge il nome e le mette nella scheda giusta.</small></span>
       </button>
+      <div class="info-box" style="margin:0">💡 <strong>Più veloce:</strong> trascina i file direttamente sulla pagina, anche moduli e foto insieme. Su iPad: apri l'app File o Foto affiancata, tieni premuto sui file e trascinali qui.</div>
       <div style="font-size:11px;color:#aaa">Tutto resta solo su questo dispositivo. La prima volta la lettura delle foto ha bisogno di internet per prepararsi (circa 12 MB), poi funziona anche offline.</div>
     </div>
   </div>
@@ -5782,8 +5788,8 @@ function compressImage(file) {
     img.src = url;
   });
 }
-async function addEmpDocs(input) {
-  const files = [...(input.files || [])];
+async function addEmpDocs(input) { return addEmpDocFiles([...(input.files || [])]); }
+async function addEmpDocFiles(files) {
   if (!files.length) return;
   const empId = currentEmpDocsId();
   const kind = document.getElementById('e-doc-kind').value;
@@ -6061,8 +6067,17 @@ function parseDocxForm(buf) {
   return out;
 }
 function pickFormsFile() { const el = document.getElementById('forms-file'); el.value = ''; el.click(); }
-async function handleFormsFiles(input) {
-  const files = [...(input.files || [])];
+// Due valori sono "uguali" se cambiano solo maiuscole, accenti, apostrofi, punteggiatura o spazi
+// (es. "Bergamo" = "BERGAMO", "Via D'Alzano 10" = "VIA D’ALZANO, N. 10")
+function sameValue(k, a, b) {
+  if (k === 'iban') return normIban(a) === normIban(b);
+  if (k === 'ddn') return parseToISO(String(a).replace(/\./g, '/')) === parseToISO(String(b).replace(/\./g, '/'));
+  const norm = x => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ').replace(/\b(N|NR|NUM|NUMERO|CIVICO)\b/g, ' ').replace(/\s+/g, '').trim();
+  return norm(a) === norm(b);
+}
+async function handleFormsFiles(input) { return processFormFiles([...(input.files || [])]); }
+async function processFormFiles(files) {
   if (!files.length) return;
   const results = [], errors = [], conflicts = [];
   for (const f of files) {
@@ -6093,8 +6108,7 @@ async function handleFormsFiles(input) {
       Object.entries(incoming).forEach(([k, v]) => {
         const old = String(before[k] || '').trim();
         if (!v || !old) return;
-        const a = k === 'iban' ? normIban(old) : k === 'email' ? old.toLowerCase() : old;
-        if (a !== v) conflicts.push({ emp: before, k, old, v, file });
+        if (!sameValue(k, old, v)) conflicts.push({ emp: before, k, old, v, file });
       });
     }
     const r = mergePerson(raw.nome, raw.cognome, incoming);
@@ -6240,8 +6254,8 @@ function matchEmployeeFromText(text, fileName) {
 let docImportRows = [];
 let docImportNew = new Map(); // persone non in lista lette dai documenti
 function pickDocsFiles() { const el = document.getElementById('docs-import-file'); el.value = ''; el.click(); }
-async function handleDocsImportFiles(input) {
-  const files = [...(input.files || [])];
+async function handleDocsImportFiles(input) { return processDocFiles([...(input.files || [])]); }
+async function processDocFiles(files) {
   if (!files.length) return;
   closeModal('onboard-modal');
   docImportRows = [];
@@ -6348,6 +6362,51 @@ async function saveDocImport() {
   showPage('dipendenti');
   alert(`✓ ${recs.length} documenti salvati nelle schede dei dipendenti.` + (newByKey.size ? `\n${newByKey.size} dipendenti nuovi creati dalle foto (completa i loro dati).` : ''));
 }
+// ─── Trascina e rilascia i file sulla pagina ───────────────────────────────
+// Sull'iPad: app File (o Foto) affiancata, tieni premuto sui file e trascinali qui.
+function fileKind(f) {
+  const n = (f.name || '').toLowerCase(), t = f.type || '';
+  if (/\.docx$/.test(n) || t.includes('wordprocessingml')) return 'form';
+  if (/\.(xlsx|xls|csv)$/.test(n) || t.includes('spreadsheet') || t.includes('excel') || t === 'text/csv') return 'excel';
+  if (t.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif)$/.test(n) || t === 'application/pdf' || /\.pdf$/.test(n)) return 'doc';
+  return 'other';
+}
+async function handleDroppedFiles(files) {
+  if (!files.length) return;
+  const by = { form: [], excel: [], doc: [], other: [] };
+  files.forEach(f => by[fileKind(f)].push(f));
+  if (by.other.length) alert(`Non so cosa fare con: ${by.other.map(f => f.name).join(', ')}\n\nPuoi trascinare moduli Word, foto/PDF dei documenti o l'Excel dei dipendenti.`);
+  // Scheda dipendente aperta: i documenti vanno direttamente nella sua scheda
+  if (document.getElementById('emp-modal').classList.contains('open') && by.doc.length) {
+    await addEmpDocFiles(by.doc);
+    by.doc = [];
+  }
+  if (by.form.length) await processFormFiles(by.form);
+  if (by.excel.length) {
+    if (by.excel.length > 1) alert('Trascina un file Excel alla volta: uso il primo, ' + by.excel[0].name + '.');
+    showPage('dipendenti'); openImportModal(); processFile(by.excel[0]);
+  }
+  if (by.doc.length) { showPage('dipendenti'); await processDocFiles(by.doc); }
+}
+(function setupDropZone() {
+  const ov = document.createElement('div');
+  ov.id = 'drop-overlay';
+  ov.innerHTML = '<div><div style="font-size:42px">📥</div><strong>Rilascia qui i file</strong><br><span>moduli Word · foto o PDF dei documenti · Excel dei dipendenti</span></div>';
+  document.body.appendChild(ov);
+  let depth = 0;
+  const hasFiles = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  document.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; ov.classList.add('show'); });
+  document.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  document.addEventListener('dragleave', e => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) ov.classList.remove('show'); });
+  document.addEventListener('drop', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); depth = 0; ov.classList.remove('show');
+    // la zona del vecchio import Excel gestisce già il suo rilascio
+    if (e.target.closest && e.target.closest('#drop-zone')) return;
+    handleDroppedFiles([...(e.dataTransfer.files || [])]);
+  });
+})();
+
 // Scarica in anticipo i file per la lettura, così poi funziona anche senza internet
 function warmupOcrFiles() {
   ['ocr/tesseract.min.js', 'ocr/worker.min.js', 'ocr/tesseract-core-simd-lstm.wasm.js', 'ocr/tesseract-core-lstm.wasm.js', 'ocr/eng.traineddata.gz', 'ocr/heic2any.min.js']
