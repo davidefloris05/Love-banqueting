@@ -6688,18 +6688,19 @@ async function handleDroppedFiles(files) {
   let depth = 0;
   // Su iPad/iPhone durante il trascinamento i tipi possono essere "Files", "public.jpeg", "image/heic"…
   // o anche vuoti: accetto tutto tranne il semplice testo trascinato dentro la pagina.
-  const hasFiles = e => {
-    const dt = e.dataTransfer; if (!dt) return false;
-    const t = [...(dt.types || [])];
-    if (!t.length || t.includes('Files')) return true;
-    return !t.every(x => ['text/plain', 'text/html', 'text/uri-list', 'text/x-moz-url'].includes(x));
-  };
-  document.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; ov.classList.add('show'); });
-  document.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
-  document.addEventListener('dragleave', e => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) ov.classList.remove('show'); });
-  document.addEventListener('drop', e => {
-    if (!hasFiles(e)) return;
-    e.preventDefault(); depth = 0; ov.classList.remove('show');
+  // Accetto tutto ciò che arriva da FUORI dalla pagina (Finder, app File, Foto…).
+  // Ignoro solo i trascinamenti che partono dalla pagina stessa (testo o immagini dell'app).
+  let internalDrag = false;
+  document.addEventListener('dragstart', () => { internalDrag = true; }, true);
+  document.addEventListener('dragend', () => { internalDrag = false; }, true);
+  const hasFiles = e => !!e.dataTransfer && !internalDrag;
+  // in "cattura" sulla finestra: arrivano prima di qualsiasi altro elemento della pagina
+  window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; ov.classList.add('show'); }, true);
+  window.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {} ov.classList.add('show'); }, true);
+  window.addEventListener('dragleave', e => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth || !e.relatedTarget) ov.classList.remove('show'); }, true);
+  window.addEventListener('drop', e => {
+    if (!hasFiles(e)) { internalDrag = false; return; }
+    e.preventDefault(); e.stopPropagation(); depth = 0; ov.classList.remove('show');
     // la zona del vecchio import Excel gestisce già il suo rilascio
     if (e.target.closest && e.target.closest('#drop-zone')) return;
     let files = [...(e.dataTransfer.files || [])];
@@ -6707,7 +6708,8 @@ async function handleDroppedFiles(files) {
       files = [...e.dataTransfer.items].filter(it => it.kind === 'file').map(it => it.getAsFile()).filter(Boolean);
     }
     if (!files.length) {
-      alert('Ho ricevuto il trascinamento, ma senza file dentro.\n\nProva a trascinarli dall\'app File (non da WhatsApp o Mail), oppure usa il tasto "📥 Moduli e documenti".');
+      const types = [...(e.dataTransfer.types || [])].join(', ') || 'nessuno';
+      alert('Ho ricevuto il trascinamento, ma senza file dentro.\n\nProva a trascinarli dal Finder o dall\'app File (non da WhatsApp, Mail o dall\'anteprima di un altro sito), oppure usa il tasto "📥 Moduli e documenti".\n\n(Dettaglio tecnico: ' + types + ')');
       return;
     }
     handleDroppedFiles(files);
@@ -6721,7 +6723,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '16 · 28/10/2026';
+const APP_VERSION = '17 · 28/10/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
