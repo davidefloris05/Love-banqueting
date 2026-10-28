@@ -253,6 +253,12 @@
   #drop-overlay.show { display: flex; }
   #drop-overlay > div { background: #fff; border-radius: 16px; padding: 24px 30px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.15); font-size: 16px; }
   #drop-overlay span { font-size: 12px; color: #888; }
+
+  .di-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-top: 6px; }
+  .di-f { display: flex; flex-direction: column; gap: 2px; font-size: 10.5px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .di-f input { height: 32px; font-size: 13px; text-transform: none; letter-spacing: 0; color: #1a1a1a; font-weight: 400; }
+  .di-formrow { background: #fffaf3; border-radius: 10px; padding: 10px; margin: 6px 0; border-bottom: none; }
+  .di-row .di-thumb img, .di-row .di-thumb .doc-pdf { width: 96px; height: auto; max-height: 130px; object-fit: contain; background: #f3f3f3; }
 </style>
 </head>
 <body>
@@ -422,8 +428,7 @@
       <h2><span class="settings-section-icon">📥</span> Aggiorna dipendenti da moduli e documenti</h2>
       <p class="settings-section-sub">Carica i moduli Word compilati dai camerieri e le foto dei loro documenti: l'app aggiorna la lista e mette ogni documento nella scheda giusta.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn-primary" onclick="pickFormsFile()">📄 Carica moduli dati (Word)</button>
-        <button class="btn-primary" onclick="pickDocsFiles()">🪪 Carica foto documenti</button>
+        <button class="btn-primary" onclick="pickDocsFiles()">📥 Carica moduli e documenti (Word, PDF, foto)</button>
       </div>
     </div>
 
@@ -712,13 +717,9 @@
       <button class="btn-cancel" onclick="closeModal('onboard-modal')">✕</button>
     </div>
     <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
-      <button class="onb-btn" onclick="closeModal('onboard-modal');pickFormsFile()">
-        <span class="onb-ico">📄</span><span><strong>Carica moduli dati (Word)</strong><br>
-        <small>I "Modulo dati anagrafici" compilati. Puoi sceglierne tanti insieme: la lista dei dipendenti si aggiorna da sola.</small></span>
-      </button>
       <button class="onb-btn" onclick="pickDocsFiles()">
-        <span class="onb-ico">🪪</span><span><strong>Carica foto documenti</strong><br>
-        <small>Carta d'identità (fronte e retro), tessera sanitaria… anche tante foto insieme. L'app legge il nome e le mette nella scheda giusta.</small></span>
+        <span class="onb-ico">📥</span><span><strong>Carica moduli e documenti</strong><br>
+        <small>Word, PDF o foto, anche tutti insieme e mescolati. L'app capisce da sola cosa sono: i moduli dati aggiornano la lista dei dipendenti, i documenti (carta d'identità, tessera sanitaria…) vanno nella scheda giusta.</small></span>
       </button>
       <div class="info-box" style="margin:0">💡 <strong>Più veloce:</strong> trascina i file direttamente sulla pagina, anche moduli e foto insieme. Su iPad: apri l'app File o Foto affiancata, tieni premuto sui file e trascinali qui.</div>
       <div style="font-size:11px;color:#aaa">Tutto resta solo su questo dispositivo. La prima volta la lettura delle foto ha bisogno di internet per prepararsi (circa 12 MB), poi funziona anche offline.</div>
@@ -726,7 +727,7 @@
   </div>
 </div>
 <input type="file" id="forms-file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple style="display:none" onchange="handleFormsFiles(this)" />
-<input type="file" id="docs-import-file" accept="image/*,.heic,.heif,application/pdf,.pdf" multiple style="display:none" onchange="handleDocsImportFiles(this)" />
+<input type="file" id="docs-import-file" accept="image/*,.heic,.heif,application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple style="display:none" onchange="handleDocsImportFiles(this)" />
 
 <!-- MODAL: Conferma documenti letti -->
 <div class="modal-backdrop" id="docimport-modal">
@@ -2899,7 +2900,7 @@ function fmtDate(d) {
 function parseToISO(raw) {
   if (!raw) return '';
   raw = String(raw).trim();
-  const it = raw.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  const it = raw.match(/^(\d{1,2})\s*[\/\-\.\\]\s*(\d{1,2})\s*[\/\-\.\\]\s*(\d{4})$/) || raw.match(/^(\d{2})(\d{2})(\d{4})$/);
   if (it) return `${it[3]}-${it[2].padStart(2,'0')}-${it[1].padStart(2,'0')}`;
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
   if (/^\d+$/.test(raw)) {
@@ -5684,7 +5685,7 @@ document.addEventListener('click', (ev) => {
 // I file restano SOLO su questo dispositivo (memoria interna del browser, IndexedDB):
 // non vanno mai online. Per spostarli su un altro dispositivo si usa il backup.
 
-const DOC_KINDS = ['Carta d\'identità', 'Carta d\'identità – retro', 'Codice fiscale / Tessera sanitaria', 'Permesso di soggiorno', 'Patente', 'Contratto', 'Altro'];
+const DOC_KINDS = ['Carta d\'identità', 'Carta d\'identità – retro', 'Carta d\'identità – fronte e retro', 'Codice fiscale / Tessera sanitaria', 'Permesso di soggiorno', 'Patente', 'Contratto', 'Altro'];
 const DOC_MAX_PDF_MB = 15;
 let docsCache = [];          // [{id, empId, name, type, kind, size, added, blob, b64}]
 let docsReady = false;
@@ -6078,21 +6079,15 @@ function sameValue(k, a, b) {
   return norm(a) === norm(b);
 }
 async function handleFormsFiles(input) { return processFormFiles([...(input.files || [])]); }
-async function processFormFiles(files) {
-  if (!files.length) return;
-  const results = [], errors = [], conflicts = [];
-  for (const f of files) {
-    try {
-      if (/\.(xlsx|xls|csv)$/i.test(f.name)) { errors.push(`${f.name}: è un Excel, usa "Importa Excel" in Dipendenti`); continue; }
-      const raw = parseDocxForm(await f.arrayBuffer());
-      if (!raw.nome || !raw.cognome) { errors.push(`${f.name}: non ho trovato nome e cognome`); continue; }
-      results.push({ file: f.name, raw });
-    } catch (e) { errors.push(`${f.name}: ${e.message}`); }
-  }
+async function processFormFiles(files) { return processAnyFiles(files); }
+// Applica i moduli letti: completa/crea i dipendenti; chiede prima di cambiare dati diversi.
+// Con returnText=true restituisce il riepilogo invece di mostrarlo.
+function applyFormResults(results, errors, total, returnText) {
+  const conflicts = [];
   let added = 0, completed = 0, same = 0;
   results.forEach(({ file, raw }) => {
     const incoming = {
-      ddn: parseToISO(String(raw.ddn || '').replace(/\./g, '/')),
+      ddn: parseToISO(String(raw.ddn || '').replace(/\./g, '/')) || parseFormDate(raw.ddn),
       citta: niceCase(String(raw.citta || '').replace(/\s*\([A-Z]{2}\)\s*$/i, '')),
       provincia: (String(raw.citta || '').match(/\(([A-Z]{2})\)\s*$/i) || [])[1] || '',
       email: String(raw.email || '').trim().toLowerCase(),
@@ -6131,10 +6126,12 @@ async function processFormFiles(files) {
   }
   saveAll(); renderDipendenti();
   const badIban = results.filter(r => r.raw.iban && !ibanValid(r.raw.iban)).map(r => `${r.raw.cognome} ${r.raw.nome}`);
-  alert(`Moduli letti: ${results.length} di ${files.length}\n\n• ${added} dipendenti nuovi\n• ${completed} completati con dati nuovi\n• ${same} già a posto` +
+  const msg = `Moduli letti: ${results.length} di ${total}\n\n• ${added} dipendenti nuovi\n• ${completed} completati con dati nuovi\n• ${same} già a posto` +
         (changed ? `\n• ${changed} dati aggiornati` : '') +
         (badIban.length ? `\n\n⚠️ IBAN da controllare (sembra sbagliato): ${badIban.join(', ')}` : '') +
-        (errors.length ? `\n\nNon letti:\n${errors.join('\n')}` : ''));
+        (errors.length ? `\n\nNon letti:\n${errors.join('\n')}` : '');
+  if (returnText) return msg;
+  alert(msg);
 }
 
 // ─── 2) Foto dei documenti con lettura automatica ───────────────────────────
@@ -6201,16 +6198,17 @@ function fuzzyContains(hay, needle) {
   return false;
 }
 function parseMrzName(text) {
-  // Riga MRZ: COGNOME<<NOME<<<<<  (l'OCR a volte legge i '<' come K o L: li tolgo in fondo)
-  const clean = p => p.replace(/(?:[<KL]{3,}|<).*$/, m => m.startsWith('<') && !/^<[KL<]{2,}/.test(m) && /^<[A-Z]{2,}/.test(m) ? m : '')
-                      .replace(/[<KL]{3,}.*$/, '').replace(/</g, ' ').replace(/\s+/g, ' ').trim();
-  const lines = text.toUpperCase().split('\n').map(l => l.replace(/\s/g, '').replace(/«/g, '<'));
+  const lines = String(text).toUpperCase().split('\n').map(l => l.replace(/\s/g, '').replace(/[«{(\[]/g, '<'));
   for (const l of lines) {
-    const m = l.match(/^([A-Z]{2,}(?:<[A-Z]+)*)<<([A-Z<KL]{2,})/);
-    if (m && !/^(IDITA|CITA|C<ITA|I<ITA)/.test(m[1])) {
-      const cognome = clean(m[1]), nome = clean(m[2]);
-      if (cognome.length >= 2 && nome.length >= 2) return { cognome, nome };
-    }
+    if (/^(IDITA|CITA|C<ITA|I<ITA)/.test(l) || /\d{5}/.test(l)) continue;      // righe 1 e 2 della MRZ
+    const m = l.match(/^([A-Z]{2,}(?:<[A-Z]{2,})*)(<[<KLC]{0,3}<|<K|K<L?|LK<|<L<)(.*)$/);
+    if (!m || (l.match(/</g) || []).length < 3) continue;                    // la riga vera ha tanti '<' di riempimento
+    const cognome = m[1].replace(/</g, ' ').trim();
+    const nm = m[3].replace(/^[<KL]+(?=[A-Z]{3})/, '').replace(/[SKLC]{4,}.*$/, '').match(/^([A-Z]{2,}(?:<[A-Z]{2,})?)/);
+    if (!nm) continue;
+    let nome = nm[1].replace(/[SKLC<]{4,}.*$/, '').replace(/</g, ' ').replace(/[KL]{3,}.*$/, '').trim();
+    const plausible = w => w.length <= 24 && w.split(' ').every(p => p.length <= 16 && /[AEIOU]/.test(p) && !/[^AEIOU]{5,}/.test(p));
+    if (cognome.length >= 2 && nome.length >= 2 && plausible(cognome) && plausible(nome)) return { cognome, nome };
   }
   return null;
 }
@@ -6219,8 +6217,11 @@ function guessDocKind(text) {
   if (/PERMESSODISOGGIORNO|RESIDENCEPERMIT/.test(t)) return 'Permesso di soggiorno';
   if (/PATENTE|DRIVINGLICEN/.test(t)) return 'Patente';
   if (/TESSERASANITARIA|TESSERAEUROPEA|HEALTHINSURANCE/.test(t)) return 'Codice fiscale / Tessera sanitaria';
-  if (/RESIDENZA|RESIDENCE|ESTREMIATTO|FATHERANDMOTHER|FISCALCODE/.test(t) || /<<|C<ITA|I<ITA/.test(text) || parseMrzName(text)) return 'Carta d\'identità – retro';
-  if (/CARTADIIDENTIT|IDENTITYCARD|REPUBBLICAITALIANA/.test(t)) return 'Carta d\'identità';
+  const back = /RESIDENZA|RESIDENCE|ESTREMIATTO|FATHERANDMOTHER|FISCALCODE/.test(t) || /<<|C<ITA|I<ITA/.test(text) || !!parseMrzName(text);
+  const front = /CARTADIIDENTIT|IDENTITYCARD|REPUBBLICAITALIANA|MINISTERODELLINTERNO/.test(t);
+  if (back && front) return 'Carta d\'identità – fronte e retro';
+  if (back) return 'Carta d\'identità – retro';
+  if (front) return 'Carta d\'identità';
   return 'Altro';
 }
 // Trova il dipendente nel testo letto. Restituisce {emp, score, how} o null.
@@ -6254,66 +6255,334 @@ function matchEmployeeFromText(text, fileName) {
 
 let docImportRows = [];
 let docImportNew = new Map(); // persone non in lista lette dai documenti
-function pickDocsFiles() { const el = document.getElementById('docs-import-file'); el.value = ''; el.click(); }
-async function handleDocsImportFiles(input) { return processDocFiles([...(input.files || [])]); }
-async function processDocFiles(files) {
+// ─── Lettura di PDF (con testo o scansionati) ───────────────────────────────
+let pdfjsReady = null;
+function loadPdfJs() {
+  if (!pdfjsReady) {
+    pdfjsReady = loadScriptOnce('ocr/pdf.min.js').then(() => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'ocr/pdf.worker.min.js';
+      return pdfjsLib;
+    }).catch(e => { pdfjsReady = null; throw e; });
+  }
+  return pdfjsReady;
+}
+// Restituisce { text, images: [Blob per pagina, max 2], thumb }
+async function readPdf(file) {
+  const lib = await loadPdfJs();
+  const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const n = Math.min(pdf.numPages, 3);
+  const lines = [];
+  for (let p = 1; p <= n; p++) {
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    // raggruppo i pezzi di testo per riga (stessa altezza), da sinistra a destra
+    const rows = [];
+    tc.items.forEach(it => {
+      if (!it.str || !it.str.trim()) return;
+      const y = it.transform[5], x = it.transform[4];
+      let r = rows.find(r => Math.abs(r.y - y) < 4);
+      if (!r) { r = { y, parts: [] }; rows.push(r); }
+      r.parts.push({ x, s: it.str });
+    });
+    rows.sort((a, b) => b.y - a.y).forEach(r => lines.push(r.parts.sort((a, b) => a.x - b.x).map(q => q.s).join(' ')));
+  }
+  const text = lines.join('\n');
+  const images = [];
+  if (letters(text).length < 40) {           // PDF scansionato: lo trasformo in immagine per leggerlo
+    for (let p = 1; p <= Math.min(pdf.numPages, 2); p++) images.push(await renderPdfPage(pdf, p, 2000));
+  }
+  const thumb = images[0] || await renderPdfPage(pdf, 1, 500);
+  return { text, images, thumb };
+}
+async function renderPdfPage(pdf, p, width) {
+  const page = await pdf.getPage(p);
+  const vp0 = page.getViewport({ scale: 1 });
+  const vp = page.getViewport({ scale: width / vp0.width });
+  const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  return new Promise(res => c.toBlob(res, 'image/jpeg', 0.9));
+}
+
+// ─── Preparazione immagine per la lettura (toglie le righe dello schermo, più contrasto) ──
+function prepForOcr(blob, width, soften) {
+  return new Promise((resolve, reject) => {
+    const u = URL.createObjectURL(blob); const im = new Image();
+    im.onload = () => {
+      URL.revokeObjectURL(u);
+      const k = Math.min(1, width / im.naturalWidth);
+      const W = Math.round(im.naturalWidth * k), H = Math.round(im.naturalHeight * k);
+      let src = im;
+      if (soften) {           // ammorbidisco: rimpicciolisco e ringrandisco (funziona in tutti i browser)
+        const s = document.createElement('canvas'); s.width = Math.round(W / soften); s.height = Math.round(H / soften);
+        s.getContext('2d').drawImage(im, 0, 0, s.width, s.height); src = s;
+      }
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(src, 0, 0, W, H);
+      const d = ctx.getImageData(0, 0, W, H), a = d.data;
+      let mn = 255, mx = 0;
+      for (let i = 0; i < a.length; i += 4) { const g = a[i] * 0.299 + a[i + 1] * 0.587 + a[i + 2] * 0.114; a[i] = g; if (g < mn) mn = g; if (g > mx) mx = g; }
+      const span = Math.max(30, mx - mn);
+      for (let i = 0; i < a.length; i += 4) { let g = (a[i] - mn) * 255 / span; g = (g - 128) * 1.5 + 128; g = g < 0 ? 0 : g > 255 ? 255 : g; a[i] = a[i + 1] = a[i + 2] = g; }
+      ctx.putImageData(d, 0, 0);
+      c.toBlob(resolve, 'image/png');
+    };
+    im.onerror = () => { URL.revokeObjectURL(u); reject(new Error('immagine non leggibile')); };
+    im.src = u;
+  });
+}
+// Prova più letture e tiene la migliore (si ferma appena capisce di chi è / cos'è)
+async function ocrBest(worker, blob, fileName) {
+  const passes = [[1400, 1.6], [0, 0], [1000, 1.3]];
+  let best = null;
+  for (const [w, soft] of passes) {
+    let input = blob;
+    try { if (w) input = await prepForOcr(blob, w, soft); } catch (e) { continue; }
+    let r;
+    try { r = await worker.recognize(input); } catch (e) { continue; }
+    const text = r.data.text || '';
+    const kind = classifyText(text);
+    const m = matchEmployeeFromText(text, fileName);
+    const form = kind === 'form' ? parseFormText(text) : null;
+    const score = (m && m.emp ? 20 : 0) + (parseMrzName(text) ? 10 : 0) + (form ? formScore(form) * 3 : 0) + (r.data.confidence || 0) / 10;
+    if (!best || score > best.score) best = { text, score };
+    if ((m && m.emp && m.score >= 4) || (form && formScore(form) >= 5)) break;
+  }
+  return best ? best.text : '';
+}
+
+// ─── Modulo o documento? ────────────────────────────────────────────────────
+function classifyText(text) {
+  const L = letters(text);
+  const isForm = /MODULODATI|DATIANAGRAFICI|ANAGRAFICICAMERIERI/.test(L) || (/IBAN/.test(L) && /COGNOME/.test(L) && /RESIDENZA|EMAIL|MAIL/.test(L));
+  const isId = /<<|C<ITA/.test(text) || /CARTADIIDENTIT|IDENTITYCARD|MINISTERODELLINTERNO|PASSAPORTO|PASSPORT|PATENTEDIGUIDA|DRIVINGLICEN|TESSERASANITARIA|PERMESSODISOGGIORNO/.test(L);
+  if (isForm && !(isId && !/MODULODATI|DATIANAGRAFICI/.test(L))) return 'form';
+  return 'doc';
+}
+// Corregge gli errori tipici di lettura nell'IBAN (O→0, I→1…) finché il codice di controllo torna
+function fixIban(raw) {
+  const v = normIban(raw);
+  if (!v) return '';
+  if (ibanValid(v)) return v;
+  const toDigit = { O: '0', Q: '0', D: '0', I: '1', L: '1', T: '1', Z: '2', S: '5', B: '8', G: '6' };
+  const a = v.split('');
+  if (a[0] === '1') a[0] = 'I'; if (a[1] === '7' || a[1] === '1') a[1] = 'T';
+  [2, 3].forEach(i => { if (toDigit[a[i]]) a[i] = toDigit[a[i]]; });
+  if (a[0] === 'I' && a[1] === 'T') {
+    if (a[4] === '0') a[4] = 'O';                                           // CIN: lettera
+    for (let i = 5; i < 15 && i < a.length; i++) if (toDigit[a[i]]) a[i] = toDigit[a[i]]; // ABI e CAB: cifre
+    const c = a.join('').slice(0, 27);
+    if (ibanValid(c)) return c;
+  }
+  return v;
+}
+function parseFormDate(s) {
+  const m = String(s || '').match(/(\d{1,2})\s*[\\\/.\-]\s*(\d{1,2})\s*[\\\/.\-]\s*(\d{4})/) || String(s || '').replace(/\s/g, '').match(/(?<!\d)(\d{2})(\d{2})(\d{4})(?!\d)/);
+  if (!m) return '';
+  const d = +m[1], mo = +m[2], y = +m[3];
+  if (d < 1 || d > 31 || mo < 1 || mo > 12 || y < 1920 || y > 2030) return '';
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+// Legge il modulo dal testo (PDF o foto): righe "Voce  valore"
+function parseFormText(text) {
+  const out = {};
+  const junk = s => String(s || '').replace(/^[\s|:;=\-–—_.,'"]+|[\s|=\-–—_~]+$/g, '').replace(/\s*\|\s*/g, ' ').trim();
+  const LBL = [
+    ['residenza', /^\W*res[i1l]?d[e3]n[sz]a\s*(?:\([^)]*\)?)?\s*(.*)$/i],
+    ['citta', /^\W*lu[o0]g[o0]\s*d[i1l]?\s*nasc\w*\s*(.*)$/i],
+    ['ddn', /^\W*data\s*d[i1l&]?\s*nasc\w*\s*(.*)$/i],
+    ['email', /^\W*e[\s.\-]?ma[i1l]{1,2}\w*\s*(.*)$/i],
+    ['cognome', /^\W*c[o0]gn[o0]me\b\s*(.*)$/i],
+    ['nome', /^\W*n[o0]me\b\s*(.*)$/i],
+    ['iban', /^\W*[i1l]?ban\b\s*(.*)$/i],
+    ['tel', /^\W*(?:telefono|cellulare|cell)\b\s*(.*)$/i],
+    ['cf', /^\W*codice\s*fiscale\s*(.*)$/i]
+  ];
+  const lines = String(text).split('\n').map(l => l.trim()).filter(Boolean);
+  lines.forEach((l, i) => {
+    for (const [k, re] of LBL) {
+      const m = l.match(re);
+      if (!m) continue;
+      let v = junk(m[1]);
+      if (!v && lines[i + 1] && !LBL.some(([, r]) => r.test(lines[i + 1]))) v = junk(lines[i + 1]);
+      if (v && !out[k]) out[k] = v;
+      break;
+    }
+  });
+  // Valori che si riconoscono da soli, ovunque siano
+  const flat = String(text).toUpperCase().replace(/\s+/g, '');
+  const ib = flat.match(/[I1][T7][0-9OIL]{2}[A-Z0-9][0-9A-Z]{22}/);
+  if (ib) out.iban = fixIban(ib[0]);
+  else if (out.iban) out.iban = fixIban(out.iban);
+  const em = String(text).match(/[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+/);
+  if (em) out.email = em[0].toLowerCase();
+  const dd = parseFormDate(out.ddn) || (out.ddn ? '' : '');
+  out.ddn = dd;
+  ['nome', 'cognome'].forEach(k => { if (out[k]) out[k] = cleanPersonName(out[k]); });
+  if (out.email && !/^[\w.+\-]+@[\w\-]+(\.[\w\-]+)+$/.test(out.email)) out.emailDubbia = out.email;
+  if (out.citta) out.citta = out.citta.replace(/[^A-Za-zÀ-ÿ'’ ()\-]/g, '').trim();
+  return out;
+}
+function cleanPersonName(v) {
+  const toks = String(v).replace(/[^A-Za-zÀ-ÿ'’ \-]/g, ' ').split(/\s+/).filter(Boolean);
+  const particle = /^(d[aei]|del|dell[a']?|della|degli|lo|la|de|di|van|von|el|al|mc|o')$/i;
+  let keep = toks.filter(t => /^[A-ZÀ-Ý][a-zà-ÿ'’]{2,}$/.test(t) || /^[A-ZÀ-Ý]['’][A-Za-zà-ÿ]{2,}$/.test(t) || (particle.test(t) && /^[A-Z]/.test(t)));
+  if (!keep.length) keep = toks.filter(t => /^[A-ZÀ-Ý'’]{3,}$/.test(t));
+  // le particelle hanno senso solo prima di un'altra parola
+  while (keep.length > 1 && particle.test(keep[keep.length - 1])) keep.pop();
+  return keep.slice(0, 3).join(' ');
+}
+function formScore(f) { return ['nome', 'cognome', 'ddn', 'citta', 'email', 'residenza', 'iban'].filter(k => f[k]).length + (f.iban && ibanValid(f.iban) ? 1 : 0); }
+
+// ─── Un solo ingresso per moduli e documenti ────────────────────────────────
+async function processAnyFiles(files) {
   if (!files.length) return;
   closeModal('onboard-modal');
-  docImportRows = [];
-  docImportNew = new Map();
+  const forms = [], formErrors = [], reviewRows = [], excel = [];
+  docImportRows = []; docImportNew = new Map();
   openModal('docimport-modal');
   const status = document.getElementById('di-status');
-  const listEl = document.getElementById('di-list');
-  listEl.innerHTML = '';
+  document.getElementById('di-list').innerHTML = '';
   document.getElementById('di-save').disabled = true;
-  let worker = null;
-  try { status.textContent = 'Preparo la lettura dei documenti…'; worker = await getOcrWorker(); }
-  catch (e) { status.textContent = '⚠️ Lettura automatica non disponibile (' + e.message + '). Scegli tu la persona per ogni file.'; }
+  let worker = null, workerTried = false;
+  const ensureWorker = async () => {
+    if (workerTried) return worker;
+    workerTried = true;
+    try { status.textContent = 'Preparo la lettura automatica…'; worker = await getOcrWorker(); }
+    catch (e) { worker = null; status.textContent = '⚠️ Lettura automatica non disponibile (' + e.message + ').'; }
+    return worker;
+  };
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
-    status.textContent = `Leggo il documento ${i + 1} di ${files.length}…`;
-    const row = { id: newId(), file: f, name: f.name, blob: null, type: '', text: '', match: null, kind: 'Altro', empChoice: '', newPerson: null };
+    status.textContent = `Leggo il file ${i + 1} di ${files.length}: ${f.name}…`;
+    const n = (f.name || '').toLowerCase();
+    const row = { id: newId(), file: f, name: f.name, blob: null, type: '', text: '', match: null, kind: 'Altro', empChoice: '', newPerson: null, thumbBlob: null };
     try {
-      const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+      if (/\.docx$/.test(n) || (f.type || '').includes('wordprocessingml')) {
+        const raw = parseDocxForm(await f.arrayBuffer());
+        if (raw.nome && raw.cognome) forms.push({ file: f.name, raw }); else formErrors.push(`${f.name}: non ho trovato nome e cognome`);
+        continue;
+      }
+      if (/\.(xlsx|xls|csv)$/.test(n)) { excel.push(f); continue; }
+      const isPdf = f.type === 'application/pdf' || /\.pdf$/.test(n);
+      let exactText = false;
       if (isPdf) {
-        row.blob = f; row.type = 'application/pdf';
+        const pdf = await readPdf(f);
+        row.blob = f; row.type = 'application/pdf'; row.thumbBlob = pdf.thumb;
+        if (pdf.images.length) {
+          const w = await ensureWorker();
+          if (w) for (const img of pdf.images) row.text += '\n' + await ocrBest(w, img, f.name);
+        } else { row.text = pdf.text; exactText = true; }
       } else {
         const usable = await toUsableImage(f);
         row.blob = await compressImage(usable); row.type = row.blob.type || 'image/jpeg';
-        if (worker) { const r = await worker.recognize(row.blob); row.text = r.data.text || ''; }
+        const w = await ensureWorker();
+        if (w) row.text = await ocrBest(w, row.blob, f.name);
+      }
+      if (classifyText(row.text) === 'form') {
+        const raw = parseFormText(row.text);
+        if (exactText && raw.nome && raw.cognome) { forms.push({ file: f.name, raw }); continue; }  // PDF con testo: preciso, va da solo
+        row.isForm = true; row.form = raw;                                                      // da foto: da controllare
+        reviewRows.push(row); continue;
       }
       row.kind = guessDocKind(row.text);
-      row.match = matchEmployeeFromText(row.text, f.name);
       row.newPerson = parseMrzName(row.text);
       if (row.newPerson) docImportNew.set(personKey(row.newPerson.cognome, row.newPerson.nome), row.newPerson);
-      row.empChoice = row.match && row.match.emp ? row.match.emp.id
-        : (row.newPerson && !row.match ? 'new:' + personKey(row.newPerson.cognome, row.newPerson.nome) : '');
-    } catch (e) { row.error = e.message; }
-    docImportRows.push(row);
-    renderDocImportRows();
+    } catch (e) { row.error = e.message; if (!row.blob) row.blob = f; row.type = row.type || f.type; }
+    reviewRows.push(row);
   }
-  // foto senza persona riconosciuta: provo con le persone nuove lette dalle altre foto
-  docImportRows.filter(r => !r.empChoice && r.text).forEach(r => {
-    const T = letters(r.text);
+  // 1) moduli precisi (Word, PDF con testo): aggiornano subito la lista
+  let formsMsg = '';
+  if (forms.length || formErrors.length) formsMsg = applyFormResults(forms, formErrors, forms.length + formErrors.length, true);
+  // 2) documenti: ora che la lista è aggiornata cerco di chi sono
+  reviewRows.filter(r => !r.isForm && !r.error).forEach(r => {
+    r.match = matchEmployeeFromText(r.text, r.name);
+    r.empChoice = r.match && r.match.emp ? r.match.emp.id
+      : (r.newPerson ? 'new:' + personKey(r.newPerson.cognome, r.newPerson.nome) : '');
+  });
+  // documenti senza persona: provo con le persone nuove lette da altre foto o dai moduli da controllare
+  reviewRows.filter(r => !r.isForm && !r.empChoice).forEach(r => {
+    const T = letters(r.text) + '|' + letters(r.name.replace(/\.[a-z0-9]+$/i, ''));
     for (const [k, p] of docImportNew) {
-      if (fuzzyContains(T, letters(p.cognome)) && fuzzyContains(T, letters(p.nome.split(' ')[0]))) { r.empChoice = 'new:' + k; r.linkedNew = true; break; }
+      if (fuzzyContains(T, letters(p.cognome)) && fuzzyContains(T, letters(p.nome.split(' ')[0]))) { r.empChoice = 'new:' + k; return; }
+    }
+    for (const fr of reviewRows.filter(x => x.isForm)) {
+      if (fr.form.cognome && fr.form.nome && fuzzyContains(T, letters(fr.form.cognome)) && fuzzyContains(T, letters(fr.form.nome))) { r.empChoice = 'form:' + fr.id; return; }
     }
   });
+  // una persona "nuova" letta dal retro che è la stessa di un modulo da controllare → la collego al modulo
+  const formRowsNow = reviewRows.filter(x => x.isForm);
+  reviewRows.filter(r => !r.isForm && String(r.empChoice).startsWith('new:') && r.newPerson).forEach(r => {
+    const S = letters(r.newPerson.cognome), N = letters(r.newPerson.nome.split(' ')[0]);
+    const fr = formRowsNow.find(x => x.form.cognome && (fuzzyContains(S, letters(x.form.cognome)) || fuzzyContains(letters(x.form.cognome), S)) &&
+                                     (!x.form.nome || fuzzyContains(N, letters(x.form.nome.split(' ')[0])) || fuzzyContains(letters(x.form.nome), N)));
+    if (fr) { r.empChoice = 'form:' + fr.id; if (!fr.form.nome) fr.form.nome = niceCase(r.newPerson.nome); }
+  });
+  reviewRows.filter(r => r.isForm).forEach(r => { r.include = !!(r.form.cognome && r.form.nome); r.formMatch = formTarget(r.form); });
+  docImportRows = reviewRows;
+  if (excel.length) { showPage('dipendenti'); openImportModal(); processFile(excel[0]); }
+  if (!docImportRows.length) {
+    closeModal('docimport-modal');
+    showPage('dipendenti');
+    if (formsMsg) alert(formsMsg);
+    return;
+  }
   renderDocImportRows();
-  status.textContent = `Fatto: ${files.length} file letti. Controlla e premi "Salva".`;
+  status.innerHTML = (formsMsg ? `<div style="white-space:pre-line;margin-bottom:6px">${escapeHtml(formsMsg)}</div>` : '') +
+    `Fatto: ${files.length} file letti. Controlla qui sotto e premi "Salva".`;
   document.getElementById('di-save').disabled = false;
 }
+async function processDocFiles(files) { return processAnyFiles(files); }
+// Di chi è un modulo letto da foto? (dipendente esistente o nuovo)
+function formTarget(f) {
+  if (!f.cognome || !f.nome) return null;
+  const k = personKey(f.cognome, f.nome);
+  return employees.find(e => personKey(e.cognome, e.nome) === k) ||
+         employees.find(e => fuzzyContains(letters(e.cognome), letters(f.cognome)) && letters(e.nome) === letters(f.nome) && (!f.ddn || !e.ddn || e.ddn === f.ddn)) || null;
+}
+
+function pickDocsFiles() { const el = document.getElementById('docs-import-file'); el.value = ''; el.click(); }
+async function handleDocsImportFiles(input) { return processDocFiles([...(input.files || [])]); }
 function renderDocImportRows() {
   const sorted = employees.slice().sort((a, b) => (a.cognome + a.nome).localeCompare(b.cognome + b.nome));
+  const formRows = docImportRows.filter(r => r.isForm);
   document.getElementById('di-list').innerHTML = docImportRows.map(r => {
-    const thumb = r.blob && r.type.startsWith('image/') ? `<img src="${r.thumb || (r.thumb = URL.createObjectURL(r.blob))}" alt="">` : '<span class="doc-pdf">PDF</span>';
+    const tb = r.thumbBlob || (r.blob && r.type.startsWith('image/') ? r.blob : null);
+    const thumb = tb ? `<img src="${r.thumb || (r.thumb = URL.createObjectURL(tb))}" alt="">` : '<span class="doc-pdf">PDF</span>';
+    if (r.isForm) {
+      const f = r.form, t = formTarget(f);
+      const inp = (k, lbl, extra) => `<label class="di-f"><span>${lbl}</span><input value="${escapeHtml(f[k] || '')}" ${extra || ''}
+            oninput="docImportForm('${r.id}','${k}',this.value)"></label>`;
+      const ibanOk = f.iban ? (ibanValid(f.iban) ? '<span class="di-ok">✓</span>' : '<span class="di-bad">⚠️ da controllare</span>') : '';
+      return `<div class="di-row di-formrow">
+        <div class="di-thumb">${thumb}</div>
+        <div class="di-fields">
+          <label style="display:flex;gap:6px;align-items:center;font-weight:600;font-size:13px">
+            <input type="checkbox" ${r.include ? 'checked' : ''} onchange="docImportSet('${r.id}','include',this.checked)" style="width:16px;height:16px">
+            📄 Modulo dati letto dalla foto — controlla
+          </label>
+          ${!(f.cognome && f.nome) ? '<div class="di-bad" style="font-size:11.5px;margin-top:2px">Non sono riuscito a leggerlo bene (foto poco nitida): completa i campi e spunta la casella, oppure lascialo stare.</div>' : ''}
+          <div class="di-name">${escapeHtml(r.name)} · ${t ? `va nella scheda di <strong>${escapeHtml(t.cognome + ' ' + t.nome)}</strong>` : 'nuovo dipendente'}</div>
+          <div class="di-grid">
+            ${inp('cognome', 'Cognome')}${inp('nome', 'Nome')}
+            ${inp('ddn', 'Nato/a il', 'type="date"')}${inp('citta', 'Luogo di nascita')}
+            ${inp('email', 'Email' + (f.email && !/^[\w.+\-]+@[\w\-]+(\.[\w\-]+)+$/.test(f.email) ? ' ⚠️ da correggere' : ''))}${inp('residenza', 'Residenza')}
+          </div>
+          <label class="di-f" style="margin-top:4px"><span>IBAN ${ibanOk}</span><input class="iban-val" value="${escapeHtml(fmtIban(f.iban || ''))}"
+            oninput="docImportForm('${r.id}','iban',this.value)" onchange="renderDocImportRows()"></label>
+        </div>
+      </div>`;
+    }
     const sure = r.match && r.match.emp;
+    const st = String(r.empChoice);
     const state = r.error ? `<span class="di-bad">⚠️ ${escapeHtml(r.error)}</span>`
       : sure ? `<span class="di-ok">✓ Riconosciuto ${escapeHtml(r.match.how)}</span>`
-      : String(r.empChoice).startsWith('new:') ? `<span class="di-warn">Persona non ancora in lista: verrà creata</span>`
+      : st.startsWith('new:') ? `<span class="di-warn">Persona non ancora in lista: verrà creata</span>`
+      : st.startsWith('form:') ? `<span class="di-warn">Della persona del modulo qui sopra</span>`
       : `<span class="di-warn">Non riconosciuto: scegli tu la persona</span>`;
     const opts = ['<option value="">— scegli la persona —</option>']
-      .concat([...docImportNew].map(([k, p]) => `<option value="new:${k}" ${r.empChoice === 'new:' + k ? 'selected' : ''}>+ Nuovo dipendente: ${escapeHtml(niceCase(p.cognome) + ' ' + niceCase(p.nome))}</option>`))
+      .concat(formRows.filter(fr => fr.form.cognome).map(fr => `<option value="form:${fr.id}" ${st === 'form:' + fr.id ? 'selected' : ''}>📄 Dal modulo: ${escapeHtml(niceCase(fr.form.cognome) + ' ' + niceCase(fr.form.nome || ''))}</option>`))
+      .concat([...docImportNew].map(([k, p]) => `<option value="new:${k}" ${st === 'new:' + k ? 'selected' : ''}>+ Nuovo dipendente: ${escapeHtml(niceCase(p.cognome) + ' ' + niceCase(p.nome))}</option>`))
       .concat(sorted.map(e => `<option value="${e.id}" ${r.empChoice === e.id ? 'selected' : ''}>${escapeHtml(e.cognome + ' ' + e.nome)}</option>`)).join('');
     const kinds = DOC_KINDS.map(k => `<option ${r.kind === k ? 'selected' : ''}>${k}</option>`).join('');
     return `<div class="di-row">
@@ -6327,16 +6596,35 @@ function renderDocImportRows() {
     </div>`;
   }).join('');
 }
+function docImportForm(id, k, v) {
+  const r = docImportRows.find(x => x.id === id);
+  if (!r) return;
+  r.form[k] = k === 'iban' ? normIban(v) : v;
+}
 function docImportSet(id, k, v) { const r = docImportRows.find(x => x.id === id); if (r) r[k] = v; }
 async function saveDocImport() {
-  const ready = docImportRows.filter(r => r.blob && r.empChoice);
-  const skipped = docImportRows.length - ready.length;
-  if (!ready.length) { alert('Scegli la persona per almeno un documento.'); return; }
+  const formRows = docImportRows.filter(r => r.isForm && r.include);
+  const bad = formRows.filter(r => !String(r.form.cognome || '').trim() || !String(r.form.nome || '').trim());
+  if (bad.length) { alert('In un modulo mancano nome o cognome: completali o togli la spunta.'); return; }
+  const docRows = docImportRows.filter(r => !r.isForm);
+  const ready = docRows.filter(r => r.blob && r.empChoice);
+  const skipped = docRows.length - ready.length;
+  if (!ready.length && !formRows.length) { alert('Scegli la persona per almeno un documento.'); return; }
   if (skipped && !confirm(`${skipped} file senza persona scelta non verranno salvati.\n\nContinuare?`)) return;
+  // 1) moduli controllati
+  let formMsg = '';
+  const formEmp = new Map();
+  if (formRows.length) {
+    formMsg = applyFormResults(formRows.map(r => ({ file: r.name, raw: Object.assign({}, r.form, {
+      email: /^[\w.+\-]+@[\w\-]+(\.[\w\-]+)+$/.test(String(r.form.email || '').trim()) ? r.form.email.trim() : '',
+      iban: ibanValid(r.form.iban) ? normIban(r.form.iban) : '', ddn: r.form.ddn ? r.form.ddn.split('-').reverse().join('/') : '' }) })), [], formRows.length, true);
+    formRows.forEach(r => { const e = employees.find(x => personKey(x.cognome, x.nome) === personKey(r.form.cognome, r.form.nome)); if (e) formEmp.set(r.id, e.id); });
+  }
   const newByKey = new Map();
   const recs = [];
   for (const r of ready) {
     let empId = r.empChoice;
+    if (String(empId).startsWith('form:')) { empId = formEmp.get(empId.slice(5)); if (!empId) continue; }
     if (String(empId).startsWith('new:') && docImportNew.has(empId.slice(4))) {
       const key = empId.slice(4), np = docImportNew.get(key);
       let e = employees.find(x => personKey(x.cognome, x.nome) === key) || newByKey.get(key);
@@ -6361,7 +6649,8 @@ async function saveDocImport() {
   docImportRows = [];
   closeModal('docimport-modal');
   showPage('dipendenti');
-  alert(`✓ ${recs.length} documenti salvati nelle schede dei dipendenti.` + (newByKey.size ? `\n${newByKey.size} dipendenti nuovi creati dalle foto (completa i loro dati).` : ''));
+  renderDipendenti();
+  alert((formMsg ? formMsg + '\n\n' : '') + `✓ ${recs.length} documenti salvati nelle schede dei dipendenti.` + (newByKey.size ? `\n${newByKey.size} dipendenti nuovi creati dalle foto (completa i loro dati).` : ''));
 }
 // ─── Trascina e rilascia i file sulla pagina ───────────────────────────────
 // Sull'iPad: app File (o Foto) affiancata, tieni premuto sui file e trascinali qui.
@@ -6382,7 +6671,9 @@ async function handleDroppedFiles(files) {
     await addEmpDocFiles(by.doc);
     by.doc = [];
   }
-  if (by.form.length) await processFormFiles(by.form);
+  const any = by.form.concat(by.doc);
+  by.doc = [];
+  if (any.length) { showPage('dipendenti'); await processAnyFiles(any); }
   if (by.excel.length) {
     if (by.excel.length > 1) alert('Trascina un file Excel alla volta: uso il primo, ' + by.excel[0].name + '.');
     showPage('dipendenti'); openImportModal(); processFile(by.excel[0]);
@@ -6426,10 +6717,11 @@ async function handleDroppedFiles(files) {
 // Scarica in anticipo i file per la lettura, così poi funziona anche senza internet
 function warmupOcrFiles() {
   ['ocr/tesseract.min.js', 'ocr/worker.min.js', 'ocr/tesseract-core-simd-lstm.wasm.js', 'ocr/tesseract-core-lstm.wasm.js', 'ocr/eng.traineddata.gz', 'ocr/heic2any.min.js']
+    .concat(['ocr/pdf.min.js', 'ocr/pdf.worker.min.js'])
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '15 · 28/10/2026';
+const APP_VERSION = '16 · 28/10/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
