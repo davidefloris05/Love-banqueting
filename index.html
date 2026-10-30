@@ -427,13 +427,13 @@
       </div>
 
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-        <button class="btn-primary" onclick="exportBackup()">⬇ Scarica file Excel</button>
+        <button class="btn-primary" onclick="exportBackup()">⬇ Scarica backup</button>
       </div>
 
       <div style="border-top:1px solid #eee;padding-top:14px;margin-top:4px">
         <div style="font-weight:600;font-size:14px;margin-bottom:4px">Importa backup</div>
-        <div style="font-size:12px;color:#888;margin-bottom:12px">Carica un file di backup da un altro dispositivo.</div>
-        <input type="file" id="backup-file" accept=".xlsx,.xls" style="display:none" onchange="handleBackupFile(this)" />
+        <div style="font-size:12px;color:#888;margin-bottom:12px">Carica un file di backup da un altro dispositivo (il file .json "LoveBanqueting_backup_…"; vanno bene anche i vecchi backup in Excel). Non aprirlo e non modificarlo con altre app: caricalo così com'è.</div>
+        <input type="file" id="backup-file" accept=".json,application/json,.xlsx,.xls" style="display:none" onchange="handleBackupFile(this)" />
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-secondary" onclick="triggerBackupImport('merge')">Unisci ai dati esistenti</button>
           <button class="btn-secondary btn-danger" onclick="triggerBackupImport('replace')">Sostituisci</button>
@@ -4161,7 +4161,7 @@ function purgeTrash(id) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BACKUP (export/import Excel multi-foglio)
+// BACKUP (file .json; si importano anche i vecchi backup Excel multi-foglio)
 // ═══════════════════════════════════════════════════════════════════════════
 let backupImportMode = 'merge';
 
@@ -4189,6 +4189,8 @@ function backupPresetEventi() {
   document.getElementById('bk-dipendenti').checked = true;
 }
 
+// Backup = un solo file .json con TUTTI i dati esatti (formato fatto apposta per essere ricaricato).
+// I vecchi backup in Excel si possono ancora importare.
 function exportBackup() {
   const incDip     = document.getElementById('bk-dipendenti').checked;
   const incPart    = document.getElementById('bk-partite').checked;
@@ -4201,190 +4203,59 @@ function exportBackup() {
     alert('Seleziona almeno una categoria da esportare.');
     return;
   }
+  if (incDocs && !docsReady) { alert('Sto ancora caricando i documenti: riprova tra qualche secondo.'); return; }
 
-  const wb = XLSX.utils.book_new();
-  let totalSheets = 0;
-  const parts = [];
-
-  if (incDip) {
-    const empSheet = employees.map(e => ({
-      ID: e.id,
-      Nome: e.nome || '',
-      Cognome: e.cognome || '',
-      Sesso: e.sesso || '',
-      'Data nascita': e.ddn || '',
-      Comune: e.citta || '',
-      Provincia: e.provincia || '',
-      Nazione: e.stato || '',
-      Telefono: e.tel || '',
-      Email: e.email || '',
-      Documenti: e.docs || '',
-      Note: e.note || '',
-      Ruolo: empRole(e),
-      Matricola: e.matricola || '',
-      IBAN: e.iban || '',
-      Residenza: e.residenza || '',
-      'Codice fiscale': e.cf || '',
-      'Campi extra (JSON)': e.customData ? JSON.stringify(e.customData) : ''
-    }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(empSheet.length ? empSheet : [{}]), 'Dipendenti');
-    totalSheets++;
-    parts.push(`${employees.length} dipendenti`);
-    // Definizioni dei campi personalizzati (senza queste, su un altro dispositivo i valori extra non si vedono)
-    const cfJson = JSON.stringify(customFields || []);
-    const cfChunks = [];
-    for (let i = 0; i < cfJson.length; i += 30000) cfChunks.push({ Parte: cfChunks.length + 1, 'Dati (JSON)': cfJson.slice(i, i + 30000) });
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cfChunks), 'Campi personalizzati');
-    totalSheets++;
-  }
-
-  if (incPart) {
-    const matchSheet = matches.map(m => ({
-      ID: m.id,
-      Nome: m.nome || '',
-      Data: m.data || '',
-      Orario: m.ora || '',
-      'Orario cuochi': m.oraCuochi || '',
-      'Chiamate camerieri': m.callsW ? 'si' : '',
-      'Chiamate cuochi': m.callsC ? 'si' : ''
-    }));
-    const matchCooksSheet = [];
-    matches.forEach(m => (m.cooks || []).forEach(c => matchCooksSheet.push({
-      'ID Assegnazione': c.id, 'ID Partita': m.id, 'Nome partita': m.nome,
-      'ID Dipendente': c.empId, 'Dipendente': empName(c.empId), Zona: c.zona || ''
-    })));
-
-    const staffSheet = [];
-    matches.forEach(m => {
-      (m.staff || []).forEach(s => {
-        const emp = employees.find(e => e.id === s.empId);
-        staffSheet.push({
-          'ID Assegnazione': s.id,
-          'ID Partita': m.id,
-          'Nome partita': m.nome,
-          'ID Dipendente': s.empId,
-          'Dipendente': emp ? `${emp.cognome} ${emp.nome}` : '(rimosso)',
-          Zona: s.zona || '',
-          Fascia: s.fascia || '',
-          Mansione: s.mansione || ''
-        });
-      });
-    });
-
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matchSheet.length ? matchSheet : [{}]), 'Partite');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(staffSheet.length ? staffSheet : [{}]), 'Assegnazioni');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matchCooksSheet.length ? matchCooksSheet : [{}]), 'Cuochi Partite');
-    totalSheets += 3;
-    parts.push(`${matches.length} partite`);
-  }
-
-  if (incEv) {
-    const eventSheet = events.map(ev => ({
-      ID: ev.id,
-      Nome: ev.nome || '',
-      Data: ev.data || '',
-      Luogo: ev.luogo || '',
-      Note: ev.note || '',
-      'Orario cuochi': ev.oraCuochi || '',
-      'Chiamate camerieri': ev.callsW ? 'si' : '',
-      'Chiamate cuochi': ev.callsC ? 'si' : ''
-    }));
-    const eventCooksSheet = [];
-    events.forEach(ev => (ev.cooks || []).forEach(c => eventCooksSheet.push({
-      'ID Assegnazione': c.id, 'ID Evento': ev.id, 'Nome evento': ev.nome,
-      'ID Dipendente': c.empId, 'Dipendente': empName(c.empId)
-    })));
-
-    const eventSlotsSheet = [];
-    events.forEach(ev => {
-      (ev.slots || []).forEach(slot => {
-        eventSlotsSheet.push({
-          'ID Fascia': slot.id,
-          'ID Evento': ev.id,
-          'Nome evento': ev.nome,
-          'Orario': slot.ora || '',
-          'Etichetta': slot.label || ''
-        });
-      });
-    });
-
-    const eventStaffSheet = [];
-    events.forEach(ev => {
-      (ev.staff || []).forEach(s => {
-        const emp = employees.find(e => e.id === s.empId);
-        const slot = (ev.slots || []).find(sl => sl.id === s.slotId);
-        eventStaffSheet.push({
-          'ID Assegnazione': s.id,
-          'ID Evento': ev.id,
-          'Nome evento': ev.nome,
-          'ID Fascia': s.slotId || '',
-          'Orario fascia': slot ? slot.ora : '',
-          'ID Dipendente': s.empId,
-          'Dipendente': emp ? `${emp.cognome} ${emp.nome}` : '(rimosso)'
-        });
-      });
-    });
-
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(eventSheet.length ? eventSheet : [{}]),             'Eventi');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(eventSlotsSheet.length ? eventSlotsSheet : [{}]),   'Fasce Eventi');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(eventStaffSheet.length ? eventStaffSheet : [{}]),   'Assegnazioni Eventi');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(eventCooksSheet.length ? eventCooksSheet : [{}]),   'Cuochi Eventi');
-    totalSheets += 4;
-    parts.push(`${events.length} eventi`);
-  }
-
-  if (incTrash) {
-    const trashSheet = trash.map(t => ({
-      ID: t.id,
-      Tipo: t.type,
-      'Eliminato il': new Date(t.deletedAt).toISOString(),
-      'Dati (JSON)': JSON.stringify(t.data)
-    }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trashSheet.length ? trashSheet : [{}]), 'Cestino');
-    totalSheets++;
-    parts.push(`${trash.length} nel cestino`);
-  }
-
-  if (incCalls) {
-    // Le chiamate sono salvate come testo (JSON) a pezzi, perché una cella Excel ha un limite di lunghezza
-    const json = JSON.stringify(calls);
-    const chunks = [];
-    for (let i = 0; i < json.length; i += 30000) chunks.push({ Parte: chunks.length + 1, 'Dati (JSON)': json.slice(i, i + 30000) });
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(chunks), 'Chiamate');
-    totalSheets++;
-    parts.push(`${calls.archive.length} file chiamate`);
-  }
-
-  if (incDocs) {
-    if (!docsReady) { alert('Sto ancora caricando i documenti: riprova tra qualche secondo.'); return; }
-    const docRows = docsBackupRows();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(docRows.length ? docRows : [{ ID: '' }]), 'Documenti');
-    totalSheets++;
-    parts.push(`${docsCache.length} documenti`);
-  }
-
-  if (totalSheets === 0) {
-    alert('Non ci sono dati da esportare.');
-    return;
-  }
-
-  // Genera nome file con tag che indica il contenuto
+  const data = { app: 'Love Banqueting', tipo: 'backup', v: 2, creato: new Date().toISOString(), versioneApp: APP_VERSION };
   const tags = [];
-  if (incDip)   tags.push('dip');
-  if (incPart)  tags.push('part');
-  if (incEv)    tags.push('ev');
-  if (incTrash) tags.push('trash');
-  if (incCalls) tags.push('chiam');
-  if (incDocs)  tags.push('doc');
-
+  if (incDip)   { data.employees = employees; data.customFields = customFields || []; tags.push('dip'); }
+  if (incPart)  { data.matches = matches; tags.push('part'); }
+  if (incEv)    { data.events = events; tags.push('ev'); }
+  if (incTrash) { data.trash = trash; tags.push('trash'); }
+  if (incCalls) { data.calls = calls; tags.push('chiam'); }
+  if (incDocs)  {
+    data.docs = docsCache.map(d => ({ id: d.id, empId: d.empId, name: d.name, type: d.type, kind: d.kind, added: d.added, b64: d.b64 || '' }));
+    tags.push('doc');
+  }
   const now = new Date();
   const pad = n => String(n).padStart(2,'0');
-  const filename = `LoveBanqueting_${tags.join('-')}_${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
-  // Su iPhone/iPad (app aperta dalla Home) il download diretto può non partire:
-  // si usa lo stesso sistema di condivisione dei PDF, con ripiego sul download normale.
-  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const filename = `LoveBanqueting_backup_${tags.join('-')}_${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.json`;
+  let blob;
+  try { blob = new Blob([JSON.stringify(data)], { type: 'application/json' }); }
+  catch (e) { alert('Backup troppo grande per questo dispositivo. Prova a farlo senza i documenti, e i documenti in un backup a parte.'); return; }
   shareOrDownload(blob, filename);
+}
+
+// Legge un backup .json (formato nuovo)
+function parseBackupJson(text) {
+  let o;
+  try { o = JSON.parse(text); } catch (e) { return null; }
+  if (!o || typeof o !== 'object' || o.app !== 'Love Banqueting') return null;
+  const arr = x => Array.isArray(x) ? x : null;
+  const str = v => v == null ? '' : String(v);
+  const emps = arr(o.employees), ms = arr(o.matches), evs = arr(o.events), tr = arr(o.trash), fields = arr(o.customFields);
+  const c0 = o.calls && typeof o.calls === 'object' && !Array.isArray(o.calls) ? o.calls : null;
+  const present = { dip: !!emps, part: !!ms, ev: !!evs, trash: !!tr, calls: !!c0, fields: !!fields };
+  const parsedEmps = (emps || []).filter(e => e && (e.nome || e.cognome)).map(e => Object.assign(
+    { sesso: '', ddn: '', citta: '', provincia: '', stato: '', tel: '', email: '', docs: '', note: '', matricola: '', iban: '', residenza: '', cf: '' }, e,
+    { id: str(e.id) || newId(), nome: str(e.nome).trim(), cognome: str(e.cognome).trim(), ruolo: e.ruolo === 'cuoco' ? 'cuoco' : 'cameriere',
+      customData: e.customData && typeof e.customData === 'object' ? e.customData : {} }));
+  const parsedMatches = (ms || []).filter(m => m && m.nome).map(m => Object.assign({}, m,
+    { id: str(m.id) || newId(), staff: arr(m.staff) || [], cooks: arr(m.cooks) || [], oraCuochi: m.oraCuochi || '' }));
+  const parsedEvents = (evs || []).filter(v => v && v.nome).map(v => Object.assign({}, v,
+    { id: str(v.id) || newId(), slots: arr(v.slots) || [], staff: arr(v.staff) || [], cooks: arr(v.cooks) || [], oraCuochi: v.oraCuochi || '' }));
+  const parsedTrash = (tr || []).filter(t => t && t.type && t.data);
+  const parsedCalls = c0 ? { periodStart: c0.periodStart || null, manual: arr(c0.manual) || [], archive: arr(c0.archive) || [] } : null;
+  const parsedFields = fields;
+  const parsedDocs = (arr(o.docs) || []).map(d => {
+    try {
+      if (!d || !d.id || !d.b64) return null;
+      const type = str(d.type) || 'application/octet-stream', blob = b64ToBlob(d.b64, type);
+      return { id: str(d.id), empId: str(d.empId), name: str(d.name) || 'documento', type, kind: str(d.kind) || 'Altro',
+               size: blob.size, added: +d.added || Date.now(), blob, b64: d.b64 };
+    } catch (e) { return null; }
+  }).filter(Boolean);
+  if (!Object.values(present).some(Boolean) && !parsedDocs.length) return null;
+  return { present, parsedEmps, parsedMatches, parsedEvents, parsedTrash, parsedCalls, parsedFields, parsedDocs };
 }
 
 function triggerBackupImport(mode) {
@@ -4556,169 +4427,180 @@ function mergeStatsText(st) {
   return out.length ? out.join('\n') : '• Niente di nuovo: avevi già tutto.';
 }
 
+// Legge un backup in Excel (formato vecchio, fino alla versione 23)
+function parseBackupWb(wb) {
+  const getSheet = name => wb.Sheets[name] ? XLSX.utils.sheet_to_json(wb.Sheets[name], { defval:'' }) : [];
+  const parsedDocs = parseDocsBackupRows(getSheet('Documenti'));
+
+  const empRows        = getSheet('Dipendenti');
+  const matchRows      = getSheet('Partite');
+  const staffRows      = getSheet('Assegnazioni');
+  const eventRows      = getSheet('Eventi');
+  const eventSlotRows  = getSheet('Fasce Eventi');
+  const eventStaffRows = getSheet('Assegnazioni Eventi');
+  const trashRows      = getSheet('Cestino');
+  const matchCookRows  = getSheet('Cuochi Partite');
+  const eventCookRows  = getSheet('Cuochi Eventi');
+  const callsRows      = getSheet('Chiamate');
+  let parsedCalls = null;
+  if (callsRows.length) {
+    try { parsedCalls = JSON.parse(callsRows.sort((a, b) => a.Parte - b.Parte).map(r => r['Dati (JSON)']).join('')); } catch (e) { parsedCalls = null; }
+  }
+
+  // Quali categorie contiene davvero il file (conta il foglio, anche se vuoto)
+  const has = name => !!wb.Sheets[name];
+  const present = {
+    dip:    has('Dipendenti'),
+    part:   has('Partite'),
+    ev:     has('Eventi'),
+    trash:  has('Cestino'),
+    calls:  has('Chiamate') && !!parsedCalls,
+    fields: has('Campi personalizzati')
+  };
+  let parsedFields = null;
+  if (present.fields) {
+    try {
+      const cfRows = getSheet('Campi personalizzati');
+      parsedFields = cfRows.length ? JSON.parse(cfRows.sort((a, b) => a.Parte - b.Parte).map(r => r['Dati (JSON)']).join('')) : [];
+      if (!Array.isArray(parsedFields)) parsedFields = null;
+    } catch (e) { parsedFields = null; }
+    if (!parsedFields) present.fields = false;
+  }
+
+  if (!present.dip && !present.part && !present.ev && !present.trash && !present.calls && !parsedDocs.length) return null;
+
+  // Parse employees
+  const parsedEmps = empRows
+    .filter(r => r.Nome || r.Cognome)
+    .map(r => ({
+      id:        String(r.ID || Date.now().toString()+Math.random().toString(36).slice(2,6)),
+      nome:      String(r.Nome || '').trim(),
+      cognome:   String(r.Cognome || '').trim(),
+      sesso:     String(r.Sesso || '').toUpperCase(),
+      ddn:       String(r['Data nascita'] || '').trim(),
+      citta:     String(r.Comune || '').trim(),
+      provincia: String(r.Provincia || '').trim(),
+      stato:     String(r.Nazione || '').trim(),
+      tel:       String(r.Telefono || '').trim(),
+      email:     String(r.Email || '').trim(),
+      docs:      String(r.Documenti || '').trim(),
+      note:      String(r.Note || '').trim(),
+      ruolo:     String(r.Ruolo || '').trim() === 'cuoco' ? 'cuoco' : 'cameriere',
+      matricola: String(r.Matricola || '').trim(),
+      iban:      normIban(r.IBAN || ''),
+      residenza: String(r.Residenza || '').trim(),
+      cf:        String(r['Codice fiscale'] || '').trim(),
+      customData: (() => { try { return r['Campi extra (JSON)'] ? JSON.parse(r['Campi extra (JSON)']) : {}; } catch (e) { return {}; } })()
+    }));
+
+  // Parse matches
+  const parsedMatches = matchRows
+    .filter(r => r.Nome)
+    .map(r => ({
+      id:    String(r.ID || Date.now().toString()+Math.random().toString(36).slice(2,6)),
+      nome:  String(r.Nome || '').trim(),
+      data:  String(r.Data || '').trim(),
+      ora:   String(r.Orario || '').trim(),
+      staff: [],
+      oraCuochi: String(r['Orario cuochi'] || '').trim(),
+      callsW: String(r['Chiamate camerieri'] || '') === 'si',
+      callsC: String(r['Chiamate cuochi'] || '') === 'si',
+      cooks: []
+    }));
+  matchCookRows.forEach(r => {
+    const match = parsedMatches.find(m => m.id === String(r['ID Partita']));
+    if (match) match.cooks.push({ id: String(r['ID Assegnazione'] || newId()), empId: String(r['ID Dipendente'] || ''), zona: String(r.Zona || '').trim() });
+  });
+
+  staffRows.forEach(r => {
+    const match = parsedMatches.find(m => m.id === String(r['ID Partita']));
+    if (match) {
+      match.staff.push({
+        id:       String(r['ID Assegnazione'] || Date.now().toString()+Math.random().toString(36).slice(2,6)),
+        empId:    String(r['ID Dipendente'] || ''),
+        zona:     String(r.Zona || '').trim(),
+        fascia:   String(r.Fascia || '').trim(),
+        mansione: String(r.Mansione || '').trim()
+      });
+    }
+  });
+
+  // Parse events
+  const parsedEvents = eventRows
+    .filter(r => r.Nome)
+    .map(r => ({
+      id:    String(r.ID || Date.now().toString()+Math.random().toString(36).slice(2,6)),
+      nome:  String(r.Nome || '').trim(),
+      data:  String(r.Data || '').trim(),
+      luogo: String(r.Luogo || '').trim(),
+      note:  String(r.Note || '').trim(),
+      slots: [],
+      staff: [],
+      oraCuochi: String(r['Orario cuochi'] || '').trim(),
+      callsW: String(r['Chiamate camerieri'] || '') === 'si',
+      callsC: String(r['Chiamate cuochi'] || '') === 'si',
+      cooks: []
+    }));
+  eventCookRows.forEach(r => {
+    const ev2 = parsedEvents.find(e => e.id === String(r['ID Evento']));
+    if (ev2) ev2.cooks.push({ id: String(r['ID Assegnazione'] || newId()), empId: String(r['ID Dipendente'] || '') });
+  });
+
+  eventSlotRows.forEach(r => {
+    const event = parsedEvents.find(e => e.id === String(r['ID Evento']));
+    if (event) {
+      event.slots.push({
+        id:    String(r['ID Fascia'] || Date.now().toString()+Math.random().toString(36).slice(2,6)),
+        ora:   String(r['Orario'] || '').trim(),
+        label: String(r['Etichetta'] || '').trim()
+      });
+    }
+  });
+
+  eventStaffRows.forEach(r => {
+    const event = parsedEvents.find(e => e.id === String(r['ID Evento']));
+    if (event) {
+      event.staff.push({
+        id:     String(r['ID Assegnazione'] || Date.now().toString()+Math.random().toString(36).slice(2,6)),
+        empId:  String(r['ID Dipendente'] || ''),
+        slotId: String(r['ID Fascia'] || '')
+      });
+    }
+  });
+
+  // Parse trash
+  const parsedTrash = trashRows
+    .filter(r => r.Tipo && r['Dati (JSON)'])
+    .map(r => {
+      try {
+        return {
+          id:        String(r.ID || Date.now().toString()),
+          type:      String(r.Tipo),
+          deletedAt: new Date(r['Eliminato il']).getTime() || Date.now(),
+          data:      JSON.parse(r['Dati (JSON)'])
+        };
+      } catch(e) { return null; }
+    })
+    .filter(Boolean);
+  return { present, parsedEmps, parsedMatches, parsedEvents, parsedTrash, parsedCalls, parsedFields, parsedDocs };
+}
+
 function handleBackupFile(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async function(ev) {
     try {
-      const wb = XLSX.read(ev.target.result, { type:'array' });
-      const getSheet = name => wb.Sheets[name] ? XLSX.utils.sheet_to_json(wb.Sheets[name], { defval:'' }) : [];
-      const parsedDocs = parseDocsBackupRows(getSheet('Documenti'));
-
-      const empRows        = getSheet('Dipendenti');
-      const matchRows      = getSheet('Partite');
-      const staffRows      = getSheet('Assegnazioni');
-      const eventRows      = getSheet('Eventi');
-      const eventSlotRows  = getSheet('Fasce Eventi');
-      const eventStaffRows = getSheet('Assegnazioni Eventi');
-      const trashRows      = getSheet('Cestino');
-      const matchCookRows  = getSheet('Cuochi Partite');
-      const eventCookRows  = getSheet('Cuochi Eventi');
-      const callsRows      = getSheet('Chiamate');
-      let parsedCalls = null;
-      if (callsRows.length) {
-        try { parsedCalls = JSON.parse(callsRows.sort((a, b) => a.Parte - b.Parte).map(r => r['Dati (JSON)']).join('')); } catch (e) { parsedCalls = null; }
-      }
-
-      // Quali categorie contiene davvero il file (conta il foglio, anche se vuoto)
-      const has = name => !!wb.Sheets[name];
-      const present = {
-        dip:    has('Dipendenti'),
-        part:   has('Partite'),
-        ev:     has('Eventi'),
-        trash:  has('Cestino'),
-        calls:  has('Chiamate') && !!parsedCalls,
-        fields: has('Campi personalizzati')
-      };
-      let parsedFields = null;
-      if (present.fields) {
-        try {
-          const cfRows = getSheet('Campi personalizzati');
-          parsedFields = cfRows.length ? JSON.parse(cfRows.sort((a, b) => a.Parte - b.Parte).map(r => r['Dati (JSON)']).join('')) : [];
-          if (!Array.isArray(parsedFields)) parsedFields = null;
-        } catch (e) { parsedFields = null; }
-        if (!parsedFields) present.fields = false;
-      }
-
-      if (!present.dip && !present.part && !present.ev && !present.trash && !present.calls && !parsedDocs.length) {
+      const bytes = new Uint8Array(ev.target.result);
+      let k = 0;
+      while (k < bytes.length && k < 8 && (bytes[k] <= 32 || bytes[k] >= 0xBB)) k++;   // spazi o BOM iniziali
+      const P = bytes[k] === 0x7B ? parseBackupJson(new TextDecoder().decode(bytes))   // inizia con "{": backup .json
+                                  : parseBackupWb(XLSX.read(bytes, { type: 'array' }));
+      if (!P) {
         alert('Il file non sembra essere un backup di Love Banqueting.\n\nNessun dato è stato modificato.');
         return;
       }
-
-      // Parse employees
-      const parsedEmps = empRows
-        .filter(r => r.Nome || r.Cognome)
-        .map(r => ({
-          id:        String(r.ID || Date.now().toString()+Math.random().toString(36).slice(2,6)),
-          nome:      String(r.Nome || '').trim(),
-          cognome:   String(r.Cognome || '').trim(),
-          sesso:     String(r.Sesso || '').toUpperCase(),
-          ddn:       String(r['Data nascita'] || '').trim(),
-          citta:     String(r.Comune || '').trim(),
-          provincia: String(r.Provincia || '').trim(),
-          stato:     String(r.Nazione || '').trim(),
-          tel:       String(r.Telefono || '').trim(),
-          email:     String(r.Email || '').trim(),
-          docs:      String(r.Documenti || '').trim(),
-          note:      String(r.Note || '').trim(),
-          ruolo:     String(r.Ruolo || '').trim() === 'cuoco' ? 'cuoco' : 'cameriere',
-          matricola: String(r.Matricola || '').trim(),
-          iban:      normIban(r.IBAN || ''),
-          residenza: String(r.Residenza || '').trim(),
-          cf:        String(r['Codice fiscale'] || '').trim(),
-          customData: (() => { try { return r['Campi extra (JSON)'] ? JSON.parse(r['Campi extra (JSON)']) : {}; } catch (e) { return {}; } })()
-        }));
-
-      // Parse matches
-      const parsedMatches = matchRows
-        .filter(r => r.Nome)
-        .map(r => ({
-          id:    String(r.ID || Date.now().toString()+Math.random().toString(36).slice(2,6)),
-          nome:  String(r.Nome || '').trim(),
-          data:  String(r.Data || '').trim(),
-          ora:   String(r.Orario || '').trim(),
-          staff: [],
-          oraCuochi: String(r['Orario cuochi'] || '').trim(),
-          callsW: String(r['Chiamate camerieri'] || '') === 'si',
-          callsC: String(r['Chiamate cuochi'] || '') === 'si',
-          cooks: []
-        }));
-      matchCookRows.forEach(r => {
-        const match = parsedMatches.find(m => m.id === String(r['ID Partita']));
-        if (match) match.cooks.push({ id: String(r['ID Assegnazione'] || newId()), empId: String(r['ID Dipendente'] || ''), zona: String(r.Zona || '').trim() });
-      });
-
-      staffRows.forEach(r => {
-        const match = parsedMatches.find(m => m.id === String(r['ID Partita']));
-        if (match) {
-          match.staff.push({
-            id:       String(r['ID Assegnazione'] || Date.now().toString()+Math.random().toString(36).slice(2,6)),
-            empId:    String(r['ID Dipendente'] || ''),
-            zona:     String(r.Zona || '').trim(),
-            fascia:   String(r.Fascia || '').trim(),
-            mansione: String(r.Mansione || '').trim()
-          });
-        }
-      });
-
-      // Parse events
-      const parsedEvents = eventRows
-        .filter(r => r.Nome)
-        .map(r => ({
-          id:    String(r.ID || Date.now().toString()+Math.random().toString(36).slice(2,6)),
-          nome:  String(r.Nome || '').trim(),
-          data:  String(r.Data || '').trim(),
-          luogo: String(r.Luogo || '').trim(),
-          note:  String(r.Note || '').trim(),
-          slots: [],
-          staff: [],
-          oraCuochi: String(r['Orario cuochi'] || '').trim(),
-          callsW: String(r['Chiamate camerieri'] || '') === 'si',
-          callsC: String(r['Chiamate cuochi'] || '') === 'si',
-          cooks: []
-        }));
-      eventCookRows.forEach(r => {
-        const ev2 = parsedEvents.find(e => e.id === String(r['ID Evento']));
-        if (ev2) ev2.cooks.push({ id: String(r['ID Assegnazione'] || newId()), empId: String(r['ID Dipendente'] || '') });
-      });
-
-      eventSlotRows.forEach(r => {
-        const event = parsedEvents.find(e => e.id === String(r['ID Evento']));
-        if (event) {
-          event.slots.push({
-            id:    String(r['ID Fascia'] || Date.now().toString()+Math.random().toString(36).slice(2,6)),
-            ora:   String(r['Orario'] || '').trim(),
-            label: String(r['Etichetta'] || '').trim()
-          });
-        }
-      });
-
-      eventStaffRows.forEach(r => {
-        const event = parsedEvents.find(e => e.id === String(r['ID Evento']));
-        if (event) {
-          event.staff.push({
-            id:     String(r['ID Assegnazione'] || Date.now().toString()+Math.random().toString(36).slice(2,6)),
-            empId:  String(r['ID Dipendente'] || ''),
-            slotId: String(r['ID Fascia'] || '')
-          });
-        }
-      });
-
-      // Parse trash
-      const parsedTrash = trashRows
-        .filter(r => r.Tipo && r['Dati (JSON)'])
-        .map(r => {
-          try {
-            return {
-              id:        String(r.ID || Date.now().toString()),
-              type:      String(r.Tipo),
-              deletedAt: new Date(r['Eliminato il']).getTime() || Date.now(),
-              data:      JSON.parse(r['Dati (JSON)'])
-            };
-          } catch(e) { return null; }
-        })
-        .filter(Boolean);
+      const { present, parsedEmps, parsedMatches, parsedEvents, parsedTrash, parsedCalls, parsedFields, parsedDocs } = P;
 
       // ── Anteprima e conferma ────────────────────────────────────────────
       const isReplace = backupImportMode === 'replace';
@@ -6111,20 +5993,7 @@ function copyEmpIban(empId) {
   if (moved) console.info(`IBAN spostati dal campo personalizzato: ${moved}`);
 })();
 
-// ─── Backup dei documenti (foglio "Documenti", a pezzi perché una cella Excel ha un limite) ──
-const DOC_CHUNK = 30000;
-function docsBackupRows() {
-  const rows = [];
-  docsCache.forEach(d => {
-    const parts = Math.max(1, Math.ceil((d.b64 || '').length / DOC_CHUNK));
-    for (let i = 0; i < parts; i++) rows.push({
-      ID: d.id, 'ID Dipendente': d.empId, Dipendente: empName(d.empId), Tipo: d.kind, 'Nome file': d.name,
-      Formato: d.type, Aggiunto: new Date(d.added).toISOString(), Parte: i + 1, 'Totale parti': parts,
-      Dati: (d.b64 || '').slice(i * DOC_CHUNK, (i + 1) * DOC_CHUNK)
-    });
-  });
-  return rows;
-}
+// ─── Documenti dai vecchi backup Excel (foglio "Documenti", a pezzi) ──
 function parseDocsBackupRows(rows) {
   const by = new Map();
   rows.forEach(r => { const id = String(r.ID || ''); if (!id) return; if (!by.has(id)) by.set(id, []); by.get(id).push(r); });
@@ -7344,7 +7213,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '23 · 30/10/2026';
+const APP_VERSION = '24 · 30/10/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
