@@ -371,8 +371,8 @@
   <div id="page-chiamate" class="page">
     <div id="calls-content"></div>
     <label class="drop-native drop-page" style="margin-top:16px">
-      <span><strong>📥 Trascina qui i file chiamate</strong> <small>Excel “Chiamate dal … al …” scaricati su un altro dispositivo · oppure tocca per sceglierli</small></span>
-      <input type="file" multiple accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="onPageFileInput(this,'chiamate')"
+      <span><strong>📥 Trascina qui i file chiamate</strong> <small>Excel o PDF “Chiamate dal … al …” scaricati su un altro dispositivo · oppure tocca per sceglierli</small></span>
+      <input type="file" multiple accept="application/pdf,.pdf,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onchange="onPageFileInput(this,'chiamate')"
              ondragenter="this.parentNode.classList.add('over')" ondragleave="this.parentNode.classList.remove('over')" ondrop="this.parentNode.classList.remove('over')" />
     </label>
   </div>
@@ -830,10 +830,12 @@
       <div class="field"><label>Dal</label><div style="font-size:15px;font-weight:700" id="cd-from"></div></div>
       <div class="field"><label>Al (di solito oggi)</label><input type="date" id="cd-to" onchange="updateCallsDownloadPreview()" /></div>
       <div class="info-box" id="cd-preview" style="margin:0;line-height:1.5"></div>
+      <div style="font-size:12px;color:#888">Scegli Excel o PDF: il periodo si chiude e il file resta in "File chiamate salvati", da dove puoi riscaricarlo anche nell'altro formato.</div>
     </div>
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeModal('callsdl-modal')">Annulla</button>
-      <button class="btn-primary" onclick="confirmCallsDownload()">⬇ Scarica e chiudi periodo</button>
+      <button class="btn-secondary" onclick="confirmCallsDownload('pdf')">⬇ PDF</button>
+      <button class="btn-primary" onclick="confirmCallsDownload('xlsx')">⬇ Excel</button>
     </div>
   </div>
 </div>
@@ -3445,9 +3447,9 @@ function pdfHeadFont(doc) {
 }
 function pdfBodyFont(doc, bold) { doc.setFont('Carlito', bold ? 'bold' : 'normal'); }
 
-function pdfNew() {
+function pdfNew(orientation) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: orientation || 'portrait' });
   doc.addFileToVFS('Carlito-Regular.ttf', LB_FONTS.regular);
   doc.addFont('Carlito-Regular.ttf', 'Carlito', 'normal');
   doc.addFileToVFS('Carlito-Bold.ttf', LB_FONTS.bold);
@@ -5396,7 +5398,8 @@ function callsArchiveHTML() {
         <div class="trash-meta">${plural(a.rows.length, 'chiamata', 'chiamate')} · ${plural(new Set(a.rows.map(r => r.empId)).size, 'persona', 'persone')} · scaricato il ${fmtDate(a.createdAt.slice(0, 10))}</div>
       </div>
       <div class="trash-actions">
-        <button class="btn-sm" onclick="redownloadCalls('${a.id}')">⬇ Scarica</button>
+        <button class="btn-sm" onclick="redownloadCalls('${a.id}','xlsx')">⬇ Excel</button>
+        <button class="btn-sm" onclick="redownloadCalls('${a.id}','pdf')">⬇ PDF</button>
         <button class="btn-sm btn-danger" onclick="deleteCallsArchive('${a.id}')">Elimina</button>
       </div>
     </div>`).join('');
@@ -5505,7 +5508,7 @@ function updateCallsDownloadPreview() {
     ${plural(inRange.length, 'chiamata', 'chiamate')} · ${plural(new Set(inRange.map(x => x.empId)).size, 'persona', 'persone')}<br>
     Il nuovo periodo partirà dal <strong>${fmtDate(isoAddDays(to, 1))}</strong>${after ? ` (con già ${plural(after, 'chiamata', 'chiamate')} dentro)` : ''}.`;
 }
-function confirmCallsDownload() {
+function confirmCallsDownload(fmt) {
   const start = callsStart();
   const to = document.getElementById('cd-to').value;
   if (!to || to < start) { alert('Data non valida.'); return; }
@@ -5521,12 +5524,12 @@ function confirmCallsDownload() {
   calls.periodStart = isoAddDays(to, 1);
   saveAll();
   closeModal('callsdl-modal');
-  downloadCallsXlsx(arch);
+  if (fmt === 'pdf') downloadCallsPdf(arch); else downloadCallsXlsx(arch);
   renderCalls();
 }
-function redownloadCalls(id) {
+function redownloadCalls(id, fmt) {
   const a = calls.archive.find(x => x.id === id);
-  if (a) downloadCallsXlsx(a);
+  if (a) { if (fmt === 'pdf') downloadCallsPdf(a); else downloadCallsXlsx(a); }
 }
 function deleteCallsArchive(id) {
   const a = calls.archive.find(x => x.id === id);
@@ -5704,6 +5707,91 @@ function downloadCallsXlsx(arch) {
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
   const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   shareOrDownload(blob, arch.name + '.xlsx');
+}
+// Stesso foglio presenze, in PDF (A4 orizzontale, un mese per pagina)
+function callsFresh(arch) {
+  return Object.assign({}, arch, { rows: arch.rows.map(r => {
+    const e = employees.find(p => p.id === r.empId);
+    return e ? Object.assign({}, r, { cognome: e.cognome, nome: e.nome, matricola: e.matricola || r.matricola || '' }) : r;
+  }) });
+}
+function buildCallsPdf(arch) {
+  const doc = pdfNew('landscape');
+  const W = 297, ORANGE = [253, 233, 217], GREEN = [0, 150, 70];
+  const months = [];
+  let { y, m } = isoParts(arch.from);
+  const last = isoParts(arch.to);
+  while (y < last.y || (y === last.y && m <= last.m)) { months.push({ y, m }); m++; if (m > 12) { m = 1; y++; } }
+  months.forEach(({ y, m }, mi) => {
+    const prefix = `${y}-${String(m).padStart(2, '0')}-`;
+    const rows = arch.rows.filter(r => r.date.startsWith(prefix));
+    if (!rows.length && months.length > 1) return;
+    if (mi > 0 && doc.getNumberOfPages() >= 1 && doc.__lbUsed) doc.addPage();
+    doc.__lbUsed = true;
+    const dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    // intestazione
+    const logoH = 14, logoW = logoH / LB_LOGO_RATIO;
+    doc.addImage(LB_LOGO, 'PNG', W - 10 - logoW, 9, logoW, logoH);
+    pdfHeadFont(doc); doc.setFontSize(15); doc.setTextColor(0);
+    doc.text(String(arch.name).toUpperCase(), 10, 17);
+    pdfBodyFont(doc, false); doc.setFontSize(10); doc.setTextColor(90);
+    doc.text('Foglio presenze  |  ' + MESI[m - 1].charAt(0).toUpperCase() + MESI[m - 1].slice(1) + ' ' + y, 10, 23);
+    const people = new Map();
+    rows.forEach(r => {
+      if (!people.has(r.empId)) people.set(r.empId, { ...r, days: new Set() });
+      people.get(r.empId).days.add(+r.date.slice(8));
+    });
+    const list = [...people.values()].sort((a, b) => (a.cognome + ' ' + a.nome).toUpperCase().localeCompare((b.cognome + ' ' + b.nome).toUpperCase()));
+    const dayIso = d => prefix + String(d).padStart(2, '0');
+    const head = ['Matr.', 'Cognome', 'Nome'];
+    for (let d = 1; d <= dim; d++) head.push(GIORNI_BREVI[isoWeekday(dayIso(d))].slice(0, 2) + '\n' + String(d).padStart(2, '0'));
+    head.push('Tot');
+    const body = list.map(p => {
+      const r = [String(p.matricola || ''), String(p.cognome).toUpperCase(), String(p.nome).toUpperCase()];
+      for (let d = 1; d <= dim; d++) r.push(p.days.has(d) ? 'X' : '');
+      r.push(String(p.days.size));
+      return r;
+    });
+    const dayW = Math.min(6.2, (W - 20 - 12 - 44 - 32 - 9) / dim);
+    const cs = { 0: { cellWidth: 12, halign: 'center' }, 1: { cellWidth: 44 }, 2: { cellWidth: 32 } };
+    for (let d = 1; d <= dim; d++) cs[2 + d] = { cellWidth: dayW, halign: 'center' };
+    cs[3 + dim] = { cellWidth: 9, halign: 'center', fontStyle: 'bold' };
+    doc.autoTable({
+      startY: 29, head: [head], body,
+      margin: { left: 10, right: 10, top: 14, bottom: 16 },
+      theme: 'grid',
+      styles: { font: 'Carlito', fontStyle: 'normal', fontSize: 8, cellPadding: 1.2, textColor: 20, lineColor: [170, 170, 170], lineWidth: 0.15, valign: 'middle', overflow: 'ellipsize' },
+      headStyles: { fillColor: [217, 217, 217], textColor: 30, fontStyle: 'bold', fontSize: 6.5, halign: 'center' },
+      columnStyles: cs,
+      didParseCell: h => {
+        const c = h.column.index;
+        if (c >= 3 && c < 3 + dim && isRedDay(dayIso(c - 2))) h.cell.styles.fillColor = ORANGE;
+        if (h.section === 'body' && c >= 3 && c < 3 + dim && h.cell.raw === 'X') { h.cell.styles.textColor = GREEN; h.cell.styles.fontStyle = 'bold'; }
+      }
+    });
+    const fy = doc.lastAutoTable.finalY + 6;
+    if (fy < 190) {
+      pdfBodyFont(doc, false); doc.setFontSize(8.5); doc.setTextColor(90);
+      doc.text(`${plural(list.length, 'persona', 'persone')} · ${plural(rows.length, 'chiamata', 'chiamate')} nel mese`, 10, fy);
+    }
+  });
+  // piè di pagina
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i); pdfBodyFont(doc, false); doc.setFontSize(6.5); doc.setTextColor(120);
+    doc.text(PDF_FOOTER_COLS.map(c => c.join(' · ')).join('  ·  '), 10, 203);
+    if (n > 1) doc.text('Pagina ' + i + ' di ' + n, W - 10, 203, { align: 'right' });
+  }
+  // dati esatti nascosti: il PDF si può ricaricare nella pagina Chiamate di un altro dispositivo
+  try {
+    doc.setProperties({ title: arch.name, subject: 'Love Banqueting', creator: 'Love Banqueting', keywords: lbEncode({ v: 1, t: 'calls', name: arch.name, from: arch.from, to: arch.to,
+      rows: arch.rows.map(r => ({ c: r.cognome, n: r.nome, r: r.matricola || '', d: r.date })) }) });
+  } catch (e) {}
+  return doc;
+}
+function downloadCallsPdf(arch) {
+  if (!window.jspdf) { alert('Errore: libreria PDF non caricata.'); return; }
+  shareOrDownload(buildCallsPdf(callsFresh(arch)).output('blob'), arch.name + '.pdf');
 }
 
 document.addEventListener('click', (ev) => {
@@ -6817,7 +6905,7 @@ async function handleDroppedFiles(files) {
   let depth = 0;
   const OV_TXT = {
     partite: 'PDF delle partite (camerieri o cuochi)', eventi: 'PDF degli eventi (camerieri o cuochi)',
-    chiamate: 'file chiamate (Excel "Chiamate dal … al …")',
+    chiamate: 'file chiamate (Excel o PDF "Chiamate dal … al …")',
     dipendenti: 'moduli Word · foto o PDF dei documenti · Excel dei dipendenti'
   };
   window.dropPage = () => {
@@ -6991,11 +7079,13 @@ async function readLbPdf(file) {
   try {
     const md = await pdf.getMetadata();
     const d = lbDecode(md && md.info && md.info.Keywords);
-    if (d && (d.t === 'match' || d.t === 'event')) return d;
+    if (d && (d.t === 'match' || d.t === 'event' || d.t === 'calls')) return d;
   } catch (e) {}
   try { return lbParseOldPdf(await lbPdfPages(pdf)); } catch (e) { return null; }
 }
 
+const LB_PDF_WHERE = { match: 'il PDF di una partita: caricalo nella pagina Partite', event: 'il PDF di un evento: caricalo nella pagina Eventi',
+  calls: 'un file chiamate: caricalo nella pagina Chiamate' };
 function lbNewEmp(cognome, nome, ruolo, extra) {
   const e = Object.assign({ id: newId(), nome: niceCase(nome), cognome: niceCase(cognome),
     sesso: '', ddn: '', citta: '', provincia: '', stato: '', tel: '', email: '', docs: '', note: '',
@@ -7080,11 +7170,11 @@ async function importLbPdfs(files, page) {
     let d = null;
     try { d = await readLbPdf(f); } catch (e) { d = null; }
     if (!d) { bad.push(f.name); continue; }
-    if ((page === 'partite') !== (d.t === 'match')) { wrong.push({ f, d }); continue; }
+    if (d.t !== (page === 'partite' ? 'match' : 'event')) { wrong.push({ f, d }); continue; }
     datas.push({ f, d });
   }
   const msgs = [];
-  if (wrong.length) msgs.push(wrong.map(w => `"${w.f.name}" è il PDF di ${w.d.t === 'match' ? 'una partita: caricalo nella pagina Partite' : 'un evento: caricalo nella pagina Eventi'}.`).join('\n'));
+  if (wrong.length) msgs.push(wrong.map(w => `"${w.f.name}" è ${LB_PDF_WHERE[w.d.t]}.`).join('\n'));
   if (bad.length) msgs.push(`Non ${bad.length === 1 ? 'è un PDF' : 'sono PDF'} di ${page === 'partite' ? 'partite' : 'eventi'} fatti con l'app:\n${bad.map(n => '• ' + n).join('\n')}` +
     `\n\nQui puoi caricare solo i PDF ${page === 'partite' ? 'delle partite' : 'degli eventi'} (camerieri o cuochi). Moduli e documenti vanno nella pagina Dipendenti.`);
   if (!datas.length) { if (msgs.length) alert(msgs.join('\n\n')); return; }
@@ -7154,10 +7244,19 @@ function lbReadCallsWorkbook(wb, fileName) {
 }
 async function importCallsFiles(files) {
   const xl = files.filter(f => fileKind(f) === 'excel');
-  const other = files.filter(f => fileKind(f) !== 'excel');
+  const pdfs = files.filter(isPdfFile);
+  const other = files.filter(f => fileKind(f) !== 'excel' && !isPdfFile(f));
   const msgs = [];
-  if (other.length) msgs.push(`Qui puoi caricare solo i file chiamate (Excel "Chiamate dal … al …"):\n${other.map(f => '• ' + f.name).join('\n')}\n\nI PDF vanno nelle pagine Partite o Eventi, moduli e documenti nella pagina Dipendenti.`);
+  if (other.length) msgs.push(`Qui puoi caricare solo i file chiamate (Excel o PDF "Chiamate dal … al …"):\n${other.map(f => '• ' + f.name).join('\n')}\n\nModuli e documenti vanno nella pagina Dipendenti.`);
   const parsed = [];
+  for (const f of pdfs) {
+    let d = null;
+    try { d = await readLbPdf(f); } catch (e) {}
+    if (d && d.t === 'calls' && d.rows && d.rows.length)
+      parsed.push({ name: d.name, from: d.from, to: d.to, rows: d.rows.map(r => ({ cognome: r.c, nome: r.n, matricola: r.r || '', date: r.d })) });
+    else if (d) msgs.push(`"${f.name}" è ${LB_PDF_WHERE[d.t]}.`);
+    else msgs.push(`"${f.name}" non è un file chiamate fatto con l'app.`);
+  }
   for (const f of xl) {
     try {
       const wb = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: 'array' });
@@ -7225,11 +7324,11 @@ async function routeFiles(page, files) {
     if (isPdfFile(f)) {
       let d = null;
       try { d = await readLbPdf(f); } catch (e) {}
-      if (d) { wrong.push(`• ${f.name} → pagina ${d.t === 'match' ? 'Partite' : 'Eventi'}`); continue; }
+      if (d) { wrong.push(`• ${f.name} → pagina ${{ match: 'Partite', event: 'Eventi', calls: 'Chiamate' }[d.t]}`); continue; }
     }
     keep.push(f);
   }
-  if (wrong.length) alert('Questi sono PDF di partite/eventi: caricali nella loro pagina.\n\n' + wrong.join('\n'));
+  if (wrong.length) alert('Questi PDF non vanno nella pagina Dipendenti: caricali nella loro pagina.\n\n' + wrong.join('\n'));
   if (keep.length) return handleDroppedFiles(keep);
 }
 async function onPageFileInput(input, page) {
@@ -7245,7 +7344,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '22 · 30/10/2026';
+const APP_VERSION = '23 · 30/10/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
