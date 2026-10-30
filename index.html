@@ -229,6 +229,8 @@
   .doc-pdf { width: 82px; height: 58px; border-radius: 5px; background: #fde8f2; color: #b71651; font-weight: 800; font-size: 15px; display: flex; align-items: center; justify-content: center; }
   .doc-kind { font-size: 9.5px; color: #666; line-height: 1.2; text-align: center; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dv-img { max-width: 100%; max-height: 62vh; display: block; margin: 0 auto; border-radius: 6px; -webkit-touch-callout: default; }
+  .dv-pages { max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch; background: #f2f2f2; border-radius: 6px; padding: 6px; }
+  .dv-page { display: block; width: 100%; height: auto; margin: 0 auto 8px; box-shadow: 0 1px 4px rgba(0,0,0,.15); background: #fff; }
   .dv-pdf { width: 100%; height: 62vh; border: 1px solid #eee; border-radius: 6px; }
   .dv-hint { font-size: 11px; color: #999; margin-top: 8px; text-align: center; }
   .iban-msg { font-size: 11px; margin-top: 3px; min-height: 14px; }
@@ -5897,12 +5899,41 @@ function openDocViewer(id) {
   document.getElementById('dv-body').innerHTML = isImg
     ? `<img src="${docViewerUrl}" alt="${escapeHtml(d.name)}" class="dv-img">
        <div class="dv-hint">Su iPad/iPhone puoi anche tenere premuto sull'immagine → <strong>Copia</strong>.</div>`
-    : `<iframe src="${docViewerUrl}" class="dv-pdf" title="${escapeHtml(d.name)}"></iframe>
-       <div class="dv-hint">Se il PDF non si vede tutto, usa <strong>Apri</strong> o <strong>Condividi / Salva</strong>.</div>`;
+    : `<div class="dv-pages" id="dv-pages"><div class="dv-hint">Apro il PDF…</div></div>`;
   document.getElementById('dv-copy').style.display = isImg ? '' : 'none';
-  document.getElementById('dv-open').style.display = isImg ? 'none' : '';
+  document.getElementById('dv-open').style.display = 'none';
   document.getElementById('dv-meta').textContent = `${d.name} · ${(d.size / 1024).toFixed(0)} KB · aggiunto il ${new Date(d.added).toLocaleDateString('it-IT')}`;
   openModal('docview-modal');
+  if (!isImg) renderPdfInViewer(d, id);
+}
+// Il PDF lo disegno io, pagina per pagina, dentro la finestra: su iPhone/iPad
+// il lettore del browser mostra solo la prima pagina e "Apri" fa uscire dall'app.
+async function renderPdfInViewer(d, id) {
+  const box = document.getElementById('dv-pages');
+  try {
+    const lib = await loadPdfJs();
+    const pdf = await lib.getDocument({ data: new Uint8Array(await d.blob.arrayBuffer()) }).promise;
+    const n = Math.min(pdf.numPages, 20);
+    const width = Math.min(1600, Math.round((box.clientWidth || 600) * (window.devicePixelRatio || 1)));
+    box.innerHTML = '';
+    for (let p = 1; p <= n; p++) {
+      if (docViewerId !== id) return;          // finestra chiusa o cambiata nel frattempo
+      const page = await pdf.getPage(p);
+      const vp0 = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: width / vp0.width });
+      const c = document.createElement('canvas');
+      c.width = Math.round(vp.width); c.height = Math.round(vp.height); c.className = 'dv-page';
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      box.appendChild(c);
+    }
+    if (pdf.numPages > n) box.insertAdjacentHTML('beforeend', `<div class="dv-hint">Mostrate le prime ${n} pagine su ${pdf.numPages}: per vederle tutte usa <strong>Condividi / Salva</strong>.</div>`);
+    else if (n > 1) box.insertAdjacentHTML('afterbegin', `<div class="dv-hint" style="margin:0 0 6px">${n} pagine · scorri per vederle tutte</div>`);
+  } catch (e) {
+    if (docViewerId !== id) return;
+    box.innerHTML = `<iframe src="${docViewerUrl}" class="dv-pdf" title="${escapeHtml(d.name)}"></iframe>
+      <div class="dv-hint">Se il PDF non si vede, usa <strong>Condividi / Salva</strong>.</div>`;
+  }
 }
 function closeDocViewer() {
   closeModal('docview-modal');
