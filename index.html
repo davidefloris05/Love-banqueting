@@ -257,6 +257,7 @@
   .di-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-top: 6px; }
   .di-f { display: flex; flex-direction: column; gap: 2px; font-size: 10.5px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
   .di-f input { height: 32px; font-size: 13px; text-transform: none; letter-spacing: 0; color: #1a1a1a; font-weight: 400; }
+  .di-pick .search-select-list { position: static; max-height: 220px; }
   .di-formrow { background: #fffaf3; border-radius: 10px; padding: 10px; margin: 6px 0; border-bottom: none; }
   .di-row .di-thumb img, .di-row .di-thumb .doc-pdf { width: 96px; height: auto; max-height: 130px; object-fit: contain; background: #f3f3f3; }
 
@@ -6611,17 +6612,18 @@ function renderDocImportRows() {
       : st.startsWith('new:') ? `<span class="di-warn">Persona non ancora in lista: verrà creata</span>`
       : st.startsWith('form:') ? `<span class="di-warn">Della persona del modulo qui sopra</span>`
       : `<span class="di-warn">Non riconosciuto: scegli tu la persona</span>`;
-    const opts = ['<option value="">— scegli la persona —</option>']
-      .concat(formRows.filter(fr => fr.form.cognome).map(fr => `<option value="form:${fr.id}" ${st === 'form:' + fr.id ? 'selected' : ''}>📄 Dal modulo: ${escapeHtml(niceCase(fr.form.cognome) + ' ' + niceCase(fr.form.nome || ''))}</option>`))
-      .concat([...docImportNew].map(([k, p]) => `<option value="new:${k}" ${st === 'new:' + k ? 'selected' : ''}>+ Nuovo dipendente: ${escapeHtml(niceCase(p.cognome) + ' ' + niceCase(p.nome))}</option>`))
-      .concat(sorted.map(e => `<option value="${e.id}" ${r.empChoice === e.id ? 'selected' : ''}>${escapeHtml(e.cognome + ' ' + e.nome)}</option>`)).join('');
-    const kinds = DOC_KINDS.map(k => `<option ${r.kind === k ? 'selected' : ''}>${k}</option>`).join('');
+const kinds = DOC_KINDS.map(k => `<option ${r.kind === k ? 'selected' : ''}>${k}</option>`).join('');
     return `<div class="di-row">
       <div class="di-thumb">${thumb}</div>
       <div class="di-fields">
         <div class="di-name">${escapeHtml(r.name)}</div>
         <div style="font-size:11.5px;margin:2px 0 6px">${state}</div>
-        <select onchange="docImportSet('${r.id}','empChoice',this.value)" ${r.blob ? '' : 'disabled'}>${opts}</select>
+        <div class="search-select-wrap di-pick">
+          <input type="text" class="search-select-input" id="dip-in-${r.id}" placeholder="Scrivi nome o cognome..." autocomplete="off"
+            value="${escapeHtml(dipLabel(r.empChoice))}" ${r.blob ? '' : 'disabled'}
+            onfocus="this.select();dipSearch('${r.id}',true)" oninput="dipSearch('${r.id}')" onkeydown="dipKey(event,'${r.id}')">
+          <div class="search-select-list" id="dip-list-${r.id}"></div>
+        </div>
         <select onchange="docImportSet('${r.id}','kind',this.value)" style="margin-top:6px">${kinds}</select>
       </div>
     </div>`;
@@ -6632,6 +6634,71 @@ function docImportForm(id, k, v) {
   if (!r) return;
   r.form[k] = k === 'iban' ? normIban(v) : v;
 }
+// ─── Scelta della persona per un documento: casella in cui scrivere il nome ───
+function dipNorm(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+function dipOptions() {
+  const out = [];
+  docImportRows.filter(fr => fr.isForm && fr.form.cognome).forEach(fr => out.push({ v: 'form:' + fr.id,
+    label: niceCase(fr.form.cognome) + ' ' + niceCase(fr.form.nome || ''), meta: '📄 Dal modulo caricato insieme' }));
+  [...docImportNew].forEach(([k, p]) => out.push({ v: 'new:' + k, label: niceCase(p.cognome) + ' ' + niceCase(p.nome || ''), meta: '+ Nuovo dipendente (verrà creato)' }));
+  employees.slice().sort((a, b) => (a.cognome + a.nome).localeCompare(b.cognome + b.nome))
+    .forEach(e => out.push({ v: e.id, label: (e.cognome + ' ' + e.nome).trim(), alt: (e.nome + ' ' + e.cognome).trim(),
+      meta: [e.ddn ? fmtDate(e.ddn) : '', e.citta || ''].filter(Boolean).join(' · ') }));
+  return out;
+}
+function dipLabel(choice) { if (!choice) return ''; const o = dipOptions().find(x => x.v === String(choice)); return o ? o.label.trim() : ''; }
+let dipCreate = {}; // proposte "nuovo dipendente" per riga
+function dipSearch(id, showAll) {
+  const inp = document.getElementById('dip-in-' + id), list = document.getElementById('dip-list-' + id);
+  if (!inp || !list) return;
+  const r = docImportRows.find(x => x.id === id);
+  const raw = inp.value.trim();
+  const q = (showAll || raw === dipLabel(r && r.empChoice)) ? '' : dipNorm(raw);
+  const words = q.split(' ').filter(Boolean);
+  const all = dipOptions();
+  const res = all.filter(o => words.every(w => dipNorm(o.label + ' ' + (o.meta || '')).includes(w))).slice(0, 60);
+  let html = res.map(o => `<div class="search-select-item" onmousedown="event.preventDefault()" onclick="dipPick('${id}','${o.v}')">
+      <div style="font-weight:600">${escapeHtml(o.label)}</div>${o.meta ? `<div class="ssmeta">${escapeHtml(o.meta)}</div>` : ''}</div>`).join('');
+  // Nessuno con questo nome esatto: proposta di crearlo
+  dipCreate[id] = [];
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const exact = all.some(o => dipNorm(o.label) === q || dipNorm(o.alt) === q);
+  if (q.length >= 2 && !exact) {
+    parts.forEach((w, k) => parts[k] = titleCase(w.toLowerCase()));
+    if (parts.length === 1) dipCreate[id].push({ cognome: parts[0], nome: '' });
+    else {
+      dipCreate[id].push({ cognome: parts[0], nome: parts.slice(1).join(' ') });
+      dipCreate[id].push({ cognome: parts[parts.length - 1], nome: parts.slice(0, -1).join(' ') });
+    }
+    html += dipCreate[id].map((p, i) => `<div class="search-select-item" onmousedown="event.preventDefault()" onclick="dipNew('${id}',${i})" style="background:#fff5f8;border-top:1px solid #ffd0e0">
+      <div style="font-weight:600;color:#d81b60">+ Nuovo dipendente: ${escapeHtml(niceCase(p.cognome))} ${escapeHtml(niceCase(p.nome))}</div>
+      <div class="ssmeta">Cognome: ${escapeHtml(niceCase(p.cognome))}${p.nome ? ' · Nome: ' + escapeHtml(niceCase(p.nome)) : ''}</div></div>`).join('');
+  }
+  list.innerHTML = html || '<div class="search-select-empty">Nessun risultato</div>';
+  document.querySelectorAll('.di-pick .search-select-list.open').forEach(l => { if (l !== list) l.classList.remove('open'); });
+  list.classList.add('open');
+}
+function dipPick(id, v) { docImportSet(id, 'empChoice', v); renderDocImportRows(); }
+function dipNew(id, i) {
+  const p = (dipCreate[id] || [])[i]; if (!p) return;
+  const key = personKey(p.cognome, p.nome);
+  const ex = employees.find(e => personKey(e.cognome, e.nome) === key);
+  if (ex) return dipPick(id, ex.id);
+  if (!docImportNew.has(key)) docImportNew.set(key, { cognome: p.cognome, nome: p.nome });
+  dipPick(id, 'new:' + key);
+}
+function dipKey(ev, id) {
+  if (ev.key === 'Enter') { ev.preventDefault(); const first = document.querySelector('#dip-list-' + id + ' .search-select-item'); if (first) first.click(); }
+  else if (ev.key === 'Escape') dipClose();
+}
+function dipClose() {
+  document.querySelectorAll('.di-pick .search-select-list.open').forEach(l => {
+    l.classList.remove('open');
+    const id = l.id.slice('dip-list-'.length), r = docImportRows.find(x => x.id === id), inp = document.getElementById('dip-in-' + id);
+    if (inp && r) inp.value = dipLabel(r.empChoice); // testo lasciato a metà: torna alla scelta fatta
+  });
+}
+document.addEventListener('click', ev => { if (!ev.target.closest('.di-pick')) dipClose(); });
 function docImportSet(id, k, v) { const r = docImportRows.find(x => x.id === id); if (r) r[k] = v; }
 async function saveDocImport() {
   const formRows = docImportRows.filter(r => r.isForm && r.include);
