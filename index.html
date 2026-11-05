@@ -3740,6 +3740,40 @@ function generateEventCooksPDF() {
 }
 
 // Quando generi un PDF, la partita/evento entra nelle chiamate (le X si aggiornano da sole dopo)
+// Partite/eventi con persone assegnate ma non ancora nelle chiamate (il PDF non è stato fatto)
+function callsPendingList() {
+  const out = [];
+  const ps = calls.periodStart || '';
+  const push = (o, type) => {
+    if (!o.data) return;
+    const w = !o.callsW && (o.staff || []).length, c = !o.callsC && (o.cooks || []).length;
+    if (w || c) out.push({ o, type, w, c, closed: ps && o.data < ps });
+  };
+  matches.forEach(m => push(m, 'm')); events.forEach(v => push(v, 'e'));
+  return out.sort((a, b) => a.o.data.localeCompare(b.o.data));
+}
+function callsPendingHTML() {
+  const list = callsPendingList();
+  if (!list.length) return '';
+  return `<div class="info-box" style="background:#fff7e6;border-color:#f0c36d;margin-bottom:14px;line-height:1.5">
+    <strong>⏳ Non ancora nelle chiamate</strong> (il PDF non è ancora stato creato):
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+    ${list.map(x => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span><strong>${escapeHtml(x.o.nome)}</strong> · ${fmtDate(x.o.data)} · ${[x.w ? plural(x.o.staff.length, 'cameriere', 'camerieri') : '', x.c ? plural(x.o.cooks.length, 'cuoco', 'cuochi') : ''].filter(Boolean).join(' + ')}
+      ${x.closed ? '<span style="color:#c0392b">(giorno già dentro un file scaricato)</span>' : ''}</span>
+      <button class="btn-sm" onclick="markPendingCalls('${x.type}','${x.o.id}')">✓ Segna nelle chiamate</button></div>`).join('')}
+    </div>
+    <div style="font-size:12px;color:#888;margin-top:6px">Di solito si segnano da sole quando crei il PDF dei camerieri o dei cuochi. Con questo tasto le segni subito.</div></div>`;
+}
+function markPendingCalls(type, id) {
+  const o = (type === 'm' ? matches : events).find(x => x.id === id);
+  if (!o) return;
+  if ((o.staff || []).length) o.callsW = true;
+  if ((o.cooks || []).length) o.callsC = true;
+  saveAll(); renderCalls();
+  if (calls.periodStart && o.data < calls.periodStart)
+    alert(`Segnate. Attenzione: il ${fmtDate(o.data)} è prima del periodo aperto (dal ${fmtDate(calls.periodStart)}), quindi queste chiamate non compaiono nella tabella e non entrano nel prossimo file. Se servono, aggiungile a mano con "Aggiungi chiamata" su un giorno del periodo, o rifai quel file chiamate.`);
+}
 function markInCalls(obj, flag) {
   if (!obj.data) {
     alert((obj.luogo !== undefined ? 'Questo evento' : 'Questa partita') + ' non ha una data: il PDF è stato creato, ma non può entrare nelle chiamate.');
@@ -5233,6 +5267,7 @@ function renderCalls() {
   if (!start || !entries.length) {
     gridHTML = `<div class="empty-state">Nessuna chiamata nel periodo aperto.<br>
       Le chiamate si aggiungono da sole quando generi il PDF di una partita o di un evento.</div>`;
+    if (callsPendingList().length) gridHTML = '';
   } else {
     const last = entries.map(x => x.date).sort().pop();
     const end = last > today ? last : today;
@@ -5261,6 +5296,7 @@ function renderCalls() {
         ${end > today ? ' &nbsp;·&nbsp; i giorni dopo oggi sono in grigio' : ''}</div>`;
   }
 
+  gridHTML = callsPendingHTML() + gridHTML;
   const nPeople = new Set(entries.map(x => x.empId)).size;
   el.innerHTML = `
     <div class="board">
@@ -7310,7 +7346,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '25 · 02/11/2026';
+const APP_VERSION = '26 · 05/11/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
