@@ -828,10 +828,17 @@
       <button class="btn-cancel" onclick="closeModal('callsdl-modal')">✕</button>
     </div>
     <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
-      <div class="field"><label>Dal</label><div style="font-size:15px;font-weight:700" id="cd-from"></div></div>
-      <div class="field"><label>Al (di solito oggi)</label><input type="date" id="cd-to" onchange="updateCallsDownloadPreview()" /></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="field" style="flex:1;min-width:140px"><label>Dal</label><input type="date" id="cd-from" onchange="updateCallsDownloadPreview()" /></div>
+        <div class="field" style="flex:1;min-width:140px"><label>Al</label><input type="date" id="cd-to" onchange="updateCallsDownloadPreview()" /></div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn-sm" onclick="setCallsDlRange('today')">Solo oggi</button>
+        <button class="btn-sm" onclick="setCallsDlRange('yesterday')">Solo ieri</button>
+        <button class="btn-sm" onclick="setCallsDlRange('month')">Mese intero</button>
+      </div>
       <div class="info-box" id="cd-preview" style="margin:0;line-height:1.5"></div>
-      <div style="font-size:12px;color:#888">Scegli Excel o PDF: il periodo si chiude e il file resta in "File chiamate salvati", da dove puoi riscaricarlo anche nell'altro formato.</div>
+      <div style="font-size:12px;color:#888">Le chiamate restano sempre modificabili: se poi le cambi, puoi rifare il file quando vuoi.</div>
     </div>
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeModal('callsdl-modal')">Annulla</button>
@@ -2879,6 +2886,7 @@ let ssHighlight = 0;
 let ssFiltered  = [];
 const COOK_ZONES = ZONES.filter(z => z !== 'Ground Box'); // ai Ground Box non ci sono cuochi
 let calls = lbLoad('lb_calls', null, v => typeof v === 'object' && !Array.isArray(v)) || { periodStart: null, manual: [], archive: [] };
+calls.periodStart = null;   // le chiamate restano sempre aperte e modificabili: il file si fa per i giorni scelti
 if (!calls.manual) calls.manual = [];
 if (!calls.archive) calls.archive = [];
 let boardTab = 'camerieri';
@@ -3743,11 +3751,10 @@ function generateEventCooksPDF() {
 // Partite/eventi con persone assegnate ma non ancora nelle chiamate (il PDF non è stato fatto)
 function callsPendingList() {
   const out = [];
-  const ps = calls.periodStart || '';
   const push = (o, type) => {
     if (!o.data) return;
     const w = !o.callsW && (o.staff || []).length, c = !o.callsC && (o.cooks || []).length;
-    if (w || c) out.push({ o, type, w, c, closed: ps && o.data < ps });
+    if (w || c) out.push({ o, type, w, c });
   };
   matches.forEach(m => push(m, 'm')); events.forEach(v => push(v, 'e'));
   return out.sort((a, b) => a.o.data.localeCompare(b.o.data));
@@ -3760,7 +3767,7 @@ function callsPendingHTML() {
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
     ${list.map(x => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <span><strong>${escapeHtml(x.o.nome)}</strong> · ${fmtDate(x.o.data)} · ${[x.w ? plural(x.o.staff.length, 'cameriere', 'camerieri') : '', x.c ? plural(x.o.cooks.length, 'cuoco', 'cuochi') : ''].filter(Boolean).join(' + ')}
-      ${x.closed ? '<span style="color:#c0392b">(giorno già dentro un file scaricato)</span>' : ''}</span>
+</span>
       <button class="btn-sm" onclick="markPendingCalls('${x.type}','${x.o.id}')">✓ Segna nelle chiamate</button></div>`).join('')}
     </div>
     <div style="font-size:12px;color:#888;margin-top:6px">Di solito si segnano da sole quando crei il PDF dei camerieri o dei cuochi. Con questo tasto le segni subito.</div></div>`;
@@ -3771,8 +3778,6 @@ function markPendingCalls(type, id) {
   if ((o.staff || []).length) o.callsW = true;
   if ((o.cooks || []).length) o.callsC = true;
   saveAll(); renderCalls();
-  if (calls.periodStart && o.data < calls.periodStart)
-    alert(`Segnate. Attenzione: il ${fmtDate(o.data)} è prima del periodo aperto (dal ${fmtDate(calls.periodStart)}), quindi queste chiamate non compaiono nella tabella e non entrano nel prossimo file. Se servono, aggiungile a mano con "Aggiungi chiamata" su un giorno del periodo, o rifai quel file chiamate.`);
 }
 function markInCalls(obj, flag) {
   if (!obj.data) {
@@ -5236,7 +5241,7 @@ function callsAllEntries() {
 // Chiamate del periodo aperto (dalla data di inizio in poi)
 function callsOpenEntries() {
   const all = callsAllEntries();
-  return calls.periodStart ? all.filter(x => x.date >= calls.periodStart) : all;
+  return all;
 }
 // Inizio periodo: dopo il primo scarico è il giorno dopo; prima, la data della prima chiamata
 function callsStart(entries) {
@@ -5249,29 +5254,42 @@ function fmtShort(iso) { const { d, m } = isoParts(iso); return `${d} ${MESI_BRE
 function callsFileName(from, to) {
   const a = isoParts(from), b = isoParts(to);
   let txt;
-  if (a.y !== b.y) txt = `dal ${a.d} ${MESI_BREVI[a.m - 1]} ${a.y} al ${b.d} ${MESI_BREVI[b.m - 1]} ${b.y}`;
+  if (from === to) txt = `del ${a.d} ${MESI_BREVI[a.m - 1]} ${a.y}`;
+  else if (a.y !== b.y) txt = `dal ${a.d} ${MESI_BREVI[a.m - 1]} ${a.y} al ${b.d} ${MESI_BREVI[b.m - 1]} ${b.y}`;
   else if (a.m !== b.m) txt = `dal ${a.d} ${MESI_BREVI[a.m - 1]} al ${b.d} ${MESI_BREVI[b.m - 1]}`;
   else txt = `dal ${a.d} al ${b.d} ${MESI_BREVI[b.m - 1]}`;
   return 'Chiamate ' + txt;
 }
 
 // ─── Schermata Chiamate ─────────────────────────────────────────────────────
+let callsMonth = isoToday().slice(0, 7);   // mese mostrato nella tabella
+function callsMonthMove(d) {
+  let [y, m] = callsMonth.split('-').map(Number);
+  m += d; if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
+  callsMonth = `${y}-${String(m).padStart(2, '0')}`;
+  renderCalls();
+}
+function monthRange(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return [ym + '-01', `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`];
+}
 function renderCalls() {
   const el = document.getElementById('calls-content');
   if (!el) return;
-  const entries = callsOpenEntries();
-  const start = callsStart(entries);
+  const [mFrom, mTo] = monthRange(callsMonth);
+  const entries = callsAllEntries().filter(x => x.date >= mFrom && x.date <= mTo);
+  const start = mFrom;
   const today = isoToday();
+  const monthName = MESI[+callsMonth.slice(5) - 1].charAt(0).toUpperCase() + MESI[+callsMonth.slice(5) - 1].slice(1) + ' ' + callsMonth.slice(0, 4);
 
   let gridHTML;
-  if (!start || !entries.length) {
-    gridHTML = `<div class="empty-state">Nessuna chiamata nel periodo aperto.<br>
+  if (!entries.length) {
+    gridHTML = `<div class="empty-state">Nessuna chiamata a ${monthName}.<br>
       Le chiamate si aggiungono da sole quando generi il PDF di una partita o di un evento.</div>`;
     if (callsPendingList().length) gridHTML = '';
   } else {
-    const last = entries.map(x => x.date).sort().pop();
-    const end = last > today ? last : today;
-    const days = isoRange(start, end).slice(0, 120);
+    const end = mTo;
+    const days = isoRange(start, end);
     const people = [...new Set(entries.map(x => x.empId))]
       .map(id => employees.find(e => e.id === id))
       .sort((a, b) => (a.cognome + ' ' + a.nome).localeCompare(b.cognome + ' ' + b.nome));
@@ -5303,8 +5321,11 @@ function renderCalls() {
       <div class="board-header">
         <div>
           <div class="board-title">Chiamate</div>
-          <div class="board-subtitle">${start ? `Periodo aperto: <strong>dal ${fmtShort(start)} ${isoParts(start).y}</strong> in poi` : 'Il periodo partirà dalla prima partita o evento'}
-            &nbsp;|&nbsp; ${plural(entries.length, 'chiamata', 'chiamate')} · ${plural(nPeople, 'persona', 'persone')}</div>
+          <div class="board-subtitle" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <button class="btn-sm" onclick="callsMonthMove(-1)" title="Mese prima">‹</button>
+            <strong style="min-width:120px;text-align:center">${monthName}</strong>
+            <button class="btn-sm" onclick="callsMonthMove(1)" title="Mese dopo">›</button>
+            <span>${plural(entries.length, 'chiamata', 'chiamate')} · ${plural(nPeople, 'persona', 'persone')} · sempre modificabili</span></div>
         </div>
         <div class="board-actions">
           <button class="btn-primary" onclick="openCallsDownload()">⬇ Scarica file chiamate</button>
@@ -5317,8 +5338,8 @@ function renderCalls() {
       ${gridHTML}
     </div>
     <div class="settings-section" style="margin-top:16px">
-      <h2><span class="settings-section-icon">📁</span> File chiamate salvati</h2>
-      <p class="settings-section-sub">Ogni file scaricato resta qui: puoi riscaricarlo o eliminarlo.</p>
+      <h2><span class="settings-section-icon">📁</span> File chiamate scaricati</h2>
+      <p class="settings-section-sub">I file già fatti. Riscaricandoli escono <strong>aggiornati</strong> con le chiamate di adesso per quei giorni.</p>
       <div id="calls-archive-list">${callsArchiveHTML()}</div>
     </div>`;
 }
@@ -5329,7 +5350,7 @@ function callsArchiveHTML() {
     <div class="trash-item">
       <div class="trash-info">
         <div class="trash-name">📄 ${a.name}</div>
-        <div class="trash-meta">${plural(a.rows.length, 'chiamata', 'chiamate')} · ${plural(new Set(a.rows.map(r => r.empId)).size, 'persona', 'persone')} · scaricato il ${fmtDate(a.createdAt.slice(0, 10))}</div>
+        <div class="trash-meta">${fmtDate(a.from)}${a.to !== a.from ? ' → ' + fmtDate(a.to) : ''} · ultimo scarico il ${fmtDate(a.createdAt.slice(0, 10))}</div>
       </div>
       <div class="trash-actions">
         <button class="btn-sm" onclick="redownloadCalls('${a.id}','xlsx')">⬇ Excel</button>
@@ -5398,9 +5419,6 @@ function confirmCallPick() {
   if (cpMode === 'add') {
     const date = document.getElementById('cp-date').value;
     if (!date) { alert('Scegli il giorno.'); return; }
-    if (calls.periodStart && date < calls.periodStart) {
-      alert(`Quel giorno fa parte di un file chiamate già scaricato (il periodo aperto parte dal ${fmtDate(calls.periodStart)}).`); return;
-    }
     if (callsAllEntries().some(x => x.empId === cpSelected && x.date === date)) { alert('Questa persona ha già la chiamata in quel giorno.'); return; }
     const rm = calls.manual.findIndex(x => x.type === 'remove' && x.empId === cpSelected && x.date === date);
     if (rm >= 0) calls.manual.splice(rm, 1);              // rimette la X tolta prima
@@ -5420,60 +5438,59 @@ function confirmCallPick() {
 
 // ─── Scarico file (chiude il periodo) ───────────────────────────────────────
 function openCallsDownload() {
-  const entries = callsOpenEntries();
-  const start = callsStart(entries);
-  if (!start || !entries.length) { alert('Non ci sono chiamate nel periodo aperto.'); return; }
-  const today = isoToday();
-  document.getElementById('cd-from').textContent = fmtDate(start);
-  const to = document.getElementById('cd-to');
-  to.min = start;
-  to.value = today >= start ? today : entries.map(x => x.date).sort().pop();
-  updateCallsDownloadPreview();
+  if (!callsAllEntries().length) { alert('Non ci sono ancora chiamate.'); return; }
+  setCallsDlRange('month', true);
   openModal('callsdl-modal');
 }
-function updateCallsDownloadPreview() {
-  const start = callsStart();
-  const to = document.getElementById('cd-to').value;
-  const box = document.getElementById('cd-preview');
-  if (!to || to < start) { box.textContent = 'Scegli una data uguale o successiva all\'inizio.'; return; }
-  const inRange = callsOpenEntries().filter(x => x.date >= start && x.date <= to);
-  const after = callsOpenEntries().filter(x => x.date > to).length;
-  box.innerHTML = `Il file si chiamerà <strong>"${callsFileName(start, to)}"</strong><br>
-    ${plural(inRange.length, 'chiamata', 'chiamate')} · ${plural(new Set(inRange.map(x => x.empId)).size, 'persona', 'persone')}<br>
-    Il nuovo periodo partirà dal <strong>${fmtDate(isoAddDays(to, 1))}</strong>${after ? ` (con già ${plural(after, 'chiamata', 'chiamate')} dentro)` : ''}.`;
+function setCallsDlRange(kind, silent) {
+  const f = document.getElementById('cd-from'), t = document.getElementById('cd-to');
+  const today = isoToday();
+  if (kind === 'today') { f.value = t.value = today; }
+  else if (kind === 'yesterday') { f.value = t.value = isoAddDays(today, -1); }
+  else { const [a, b] = monthRange(callsMonth); f.value = a; t.value = b; }
+  updateCallsDownloadPreview();
 }
-function confirmCallsDownload(fmt) {
-  const start = callsStart();
-  const to = document.getElementById('cd-to').value;
-  if (!to || to < start) { alert('Data non valida.'); return; }
-  const inRange = callsOpenEntries().filter(x => x.date >= start && x.date <= to);
-  if (!inRange.length) { alert('Nessuna chiamata in questo periodo.'); return; }
-  const rows = inRange.map(x => {
+function callsInRange(from, to) {
+  return callsAllEntries().filter(x => x.date >= from && x.date <= to).map(x => {
     const e = employees.find(p => p.id === x.empId);
     return { empId: x.empId, date: x.date, cognome: e.cognome, nome: e.nome, matricola: e.matricola || '' };
   });
-  const arch = { id: newId(), from: start, to, name: callsFileName(start, to), createdAt: new Date().toISOString(),
-                 prevStart: calls.periodStart, rows };
-  calls.archive.push(arch);
-  calls.periodStart = isoAddDays(to, 1);
+}
+function updateCallsDownloadPreview() {
+  const from = document.getElementById('cd-from').value, to = document.getElementById('cd-to').value;
+  const box = document.getElementById('cd-preview');
+  if (!from || !to || to < from) { box.textContent = 'Scegli le date: "Al" deve essere uguale o dopo "Dal".'; return; }
+  const rows = callsInRange(from, to);
+  box.innerHTML = `Il file si chiamerà <strong>"${callsFileName(from, to)}"</strong><br>
+    ${rows.length ? `${plural(rows.length, 'chiamata', 'chiamate')} · ${plural(new Set(rows.map(x => x.empId)).size, 'persona', 'persone')}` : '<span style="color:#c0392b">Nessuna chiamata in questi giorni.</span>'}`;
+}
+function confirmCallsDownload(fmt) {
+  const from = document.getElementById('cd-from').value, to = document.getElementById('cd-to').value;
+  if (!from || !to || to < from) { alert('Date non valide.'); return; }
+  const rows = callsInRange(from, to);
+  if (!rows.length) { alert('Nessuna chiamata in questi giorni.'); return; }
+  let arch = calls.archive.find(x => x.from === from && x.to === to);
+  if (arch) { arch.rows = rows; arch.createdAt = new Date().toISOString(); }
+  else { arch = { id: newId(), from, to, name: callsFileName(from, to), createdAt: new Date().toISOString(), rows }; calls.archive.push(arch); }
   saveAll();
   closeModal('callsdl-modal');
   if (fmt === 'pdf') downloadCallsPdf(arch); else downloadCallsXlsx(arch);
-  renderCalls();
+  renderCalls(); renderCallsArchiveSettings();
 }
+// Riscaricare = file aggiornato con le chiamate di adesso per quei giorni
 function redownloadCalls(id, fmt) {
   const a = calls.archive.find(x => x.id === id);
-  if (a) { if (fmt === 'pdf') downloadCallsPdf(a); else downloadCallsXlsx(a); }
+  if (!a) return;
+  const rows = callsInRange(a.from, a.to);
+  if (!rows.length) { alert('In quei giorni adesso non ci sono chiamate.'); return; }
+  a.rows = rows; saveAll();
+  if (fmt === 'pdf') downloadCallsPdf(a); else downloadCallsXlsx(a);
+  renderCallsArchiveSettings();
 }
 function deleteCallsArchive(id) {
   const a = calls.archive.find(x => x.id === id);
   if (!a) return;
   if (!confirm(`Eliminare il file "${a.name}"?`)) return;
-  const isLatest = calls.archive.every(x => x.to <= a.to) && calls.periodStart === isoAddDays(a.to, 1);
-  if (isLatest && confirm(`Vuoi anche riaprire il periodo?\n\nOK = le chiamate dal ${fmtDate(a.from)} tornano nel periodo aperto (utile se l'hai scaricato per sbaglio).\nAnnulla = elimini solo il file.`)) {
-    calls.periodStart = a.prevStart || null;
-    if (calls.periodStart && calls.periodStart > a.from) calls.periodStart = a.from;
-  }
   calls.archive = calls.archive.filter(x => x.id !== id);
   saveAll(); renderCalls(); renderCallsArchiveSettings();
 }
@@ -7162,7 +7179,6 @@ function lbApplyPdf(d, created, batchNew) {
   let line = isNew ? `• Nuov${isM ? 'a' : 'o'} ${what}: ${plural(next.length, 'persona', 'persone')}`
           : changed ? `• Aggiornat${isM ? 'a' : 'o'} ${what}` + (added || removed ? ` (${added ? '+' + added : ''}${added && removed ? ', ' : ''}${removed ? '−' + removed : ''})` : '')
           : `• Già uguale: ${what}` + (callsNew ? ' (aggiunte le chiamate)' : '');
-  if (calls.periodStart && d.data < calls.periodStart && (isNew || changed || callsNew)) line += '\n   ⚠ giorno già dentro un file chiamate scaricato';
   return { status, line, obj, isM };
 }
 
@@ -7232,6 +7248,12 @@ function lbReadCallsWorkbook(wb, fileName) {
   let from = dates[0], to = dates[dates.length - 1];
   // il periodo vero è scritto nel nome: "Chiamate dal 1 al 15 nov", "dal 20 ott al 5 nov", "dal 28 dic 2026 al 3 gen 2027"
   const mm = name.toLowerCase().match(/dal (\d{1,2})(?: ([a-z]{3}))?(?: (\d{4}))? al (\d{1,2}) ([a-z]{3})(?: (\d{4}))?/);
+  const one = name.toLowerCase().match(/\bdel (\d{1,2}) ([a-z]{3})(?: (\d{4}))?/);
+  if (!mm && one && dates.length) {
+    const mo = MESI_BREVI.indexOf(one[2]) + 1, y = one[3] ? +one[3] : +to.slice(0, 4);
+    const f = `${y}-${String(mo).padStart(2, '0')}-${String(+one[1]).padStart(2, '0')}`;
+    if (mo && f <= from && f >= to) { from = to = f; }
+  }
   if (mm && dates.length) {
     const mb = x => MESI_BREVI.indexOf(x) + 1;
     const m2 = mb(mm[5]), m1 = mm[2] ? mb(mm[2]) : m2;
@@ -7280,19 +7302,21 @@ async function importCallsFiles(files) {
       if (!rows.some(x => x.empId === e.id && x.date === r.date))
         rows.push({ empId: e.id, date: r.date, cognome: e.cognome, nome: e.nome, matricola: e.matricola || '' });
     });
+    // le X del file entrano nelle chiamate di questo dispositivo (senza doppioni)
+    const have = new Set(callsAllEntries().map(x => x.empId + '|' + x.date));
+    let addedX = 0;
+    rows.forEach(r => {
+      if (have.has(r.empId + '|' + r.date)) return;
+      const rm = calls.manual.findIndex(x => x.type === 'remove' && x.empId === r.empId && x.date === r.date);
+      if (rm >= 0) calls.manual.splice(rm, 1); else calls.manual.push({ id: newId(), type: 'add', empId: r.empId, date: r.date });
+      have.add(r.empId + '|' + r.date); addedX++;
+    });
     const ex = calls.archive.find(a => a.from === p.from && a.to === p.to);
     const nPeople = new Set(rows.map(r => r.empId)).size;
-    if (ex) { ex.rows = rows; lines.push(`• "${p.name}" era già salvato: aggiornato (${plural(rows.length, 'chiamata', 'chiamate')} · ${plural(nPeople, 'persona', 'persone')})`); }
-    else {
-      calls.archive.push({ id: newId(), from: p.from, to: p.to, name: p.name, createdAt: new Date().toISOString(), prevStart: calls.periodStart || null, rows });
-      lines.push(`• "${p.name}": ${plural(rows.length, 'chiamata', 'chiamate')} · ${plural(nPeople, 'persona', 'persone')}`);
-    }
-    // il periodo del file è già stato mandato: qui il periodo aperto riparte dal giorno dopo
-    const after = isoAddDays(p.to, 1);
-    if (!calls.periodStart || calls.periodStart < after) calls.periodStart = after;
+    if (!ex) calls.archive.push({ id: newId(), from: p.from, to: p.to, name: p.name, createdAt: new Date().toISOString(), rows });
+    lines.push(`• "${p.name}": ${plural(rows.length, 'chiamata', 'chiamate')} · ${plural(nPeople, 'persona', 'persone')} → ${addedX ? plural(addedX, 'chiamata nuova', 'chiamate nuove') + ' da aggiungere' : 'erano già tutte qui'}`);
   });
-  let txt = 'File chiamate da salvare:\n' + lines.join('\n') +
-    `\n\nIl periodo aperto ripartirà dal ${fmtDate(calls.periodStart)}.`;
+  let txt = 'File chiamate da caricare:\n' + lines.join('\n');
   if (created.length) txt += `\n\nNuov${created.length === 1 ? 'o dipendente' : 'i dipendenti'} da aggiungere: ` + created.map(e => `${e.cognome} ${e.nome}`).join(', ');
   if (msgs.length) txt += '\n\n' + msgs.join('\n\n');
   if (!confirm(txt + '\n\nConfermi?')) { const o = JSON.parse(snap); employees = o.employees; calls = o.calls; return; }
@@ -7346,7 +7370,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '26 · 05/11/2026';
+const APP_VERSION = '27 · 05/11/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
