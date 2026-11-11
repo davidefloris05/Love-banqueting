@@ -4808,19 +4808,28 @@ function showMappingStep() {
     {key:'citta',label:'Comune di nascita'},{key:'provincia',label:'Provincia di nascita'},
     {key:'stato',label:'Nazione di nascita'},{key:'email',label:'Email'},{key:'tel',label:'Telefono'},{key:'iban',label:'IBAN'},{key:'residenza',label:'Residenza'},{key:'cf',label:'Codice fiscale'}
   ];
+  // nell'elenco tolgo le colonne vuote e quelle dei giorni (numeri/date del foglio presenze)
+  const realCol = h => { const t = String(h).trim(); return t && !/^[\d\s./-]+$/.test(t); };
   const opts = '<option value="-1">— Non importare —</option>' +
-    importHeaders.map((h,i)=>`<option value="${i}">${h}</option>`).join('');
-  document.getElementById('col-mapping').innerHTML = fields.map(f =>
+    importHeaders.map((h,i)=> realCol(h) ? `<option value="${i}">${escapeHtml(h)}</option>` : '').join('');
+  // Foglio presenze dell'ufficio paghe: ha solo matricola, cognome e nome
+  const presenze = importHeaders.filter(realCol).length <= 4 && importHeaders.some(h => /^matr/i.test(String(h).trim()));
+  const shown = presenze ? fields.filter(f => ['cognome', 'nome', 'matricola'].includes(f.key)) : fields;
+  document.getElementById('col-mapping').innerHTML =
+    (presenze ? `<div class="info-box" style="margin:0 0 10px;line-height:1.5">📋 Questo è il <strong>foglio presenze</strong>: contiene solo <strong>matricola, cognome e nome</strong>, quindi serve a dare le matricole alle persone.<br>
+      Data e luogo di nascita, residenza e codice fiscale sono nell'<strong>elenco dei dipendenti</strong> (es. "love_elenco_dipendenti.xls"): importa anche quello.</div>` : '') +
+    shown.map(f =>
     `<div class="col-map-row"><span class="field-name">${f.label}</span><select id="map-${f.key}">${opts}</select></div>`
-  ).join('');
+  ).join('') +
+    fields.filter(f => !shown.includes(f)).map(f => `<select id="map-${f.key}" style="display:none"><option value="-1"></option></select>`).join('');
   const used = new Set();
-  fields.forEach(f => { const idx = autoDetect(f.key, used); if (idx>=0) { used.add(idx); document.getElementById('map-'+f.key).value = idx; } });
+  shown.forEach(f => { const idx = autoDetect(f.key, used); if (idx>=0) { used.add(idx); document.getElementById('map-'+f.key).value = idx; } });
   const prev = importRows.slice(0,3);
   document.getElementById('preview-wrap').innerHTML =
     `<p style="font-size:12px;color:#888;margin-bottom:6px">Anteprima:</p>
     <div style="overflow-x:auto"><table class="preview-table">
-      <thead><tr>${importHeaders.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
-      <tbody>${prev.map(r=>`<tr>${importHeaders.map((_,i)=>`<td>${r[i]||''}</td>`).join('')}</tr>`).join('')}</tbody>
+      <thead><tr>${importHeaders.map((h,i)=> realCol(h) ? `<th>${escapeHtml(h)}</th>` : '').join('')}</tr></thead>
+      <tbody>${prev.map(r=>`<tr>${importHeaders.map((h,i)=> realCol(h) ? `<td>${escapeHtml(String(r[i]||''))}</td>` : '').join('')}</tr>`).join('')}</tbody>
     </table></div>`;
 }
 async function doImport() {
@@ -7370,7 +7379,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '27 · 05/11/2026';
+const APP_VERSION = '28 · 11/11/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
