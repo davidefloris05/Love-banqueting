@@ -5459,10 +5459,17 @@ function setCallsDlRange(kind, silent) {
   else { const [a, b] = monthRange(callsMonth); f.value = a; t.value = b; }
   updateCallsDownloadPreview();
 }
+// Matricola di una persona; se la sua scheda non l'ha ma c'è un doppione con lo stesso nome che ce l'ha, uso quella
+function matricolaOf(e) {
+  if (String(e.matricola || '').trim()) return String(e.matricola).trim();
+  const k = personKey(e.cognome, e.nome);
+  const others = [...new Set(employees.filter(p => p !== e && personKey(p.cognome, p.nome) === k && String(p.matricola || '').trim()).map(p => String(p.matricola).trim()))];
+  return others.length === 1 ? others[0] : '';
+}
 function callsInRange(from, to) {
   return callsAllEntries().filter(x => x.date >= from && x.date <= to).map(x => {
     const e = employees.find(p => p.id === x.empId);
-    return { empId: x.empId, date: x.date, cognome: e.cognome, nome: e.nome, matricola: e.matricola || '' };
+    return { empId: x.empId, date: x.date, cognome: e.cognome, nome: e.nome, matricola: matricolaOf(e) };
   });
 }
 function updateCallsDownloadPreview() {
@@ -5666,7 +5673,7 @@ function downloadCallsXlsx(arch) {
   // usa nome e matricola aggiornati (es. matricole importate dopo lo scarico)
   const fresh = Object.assign({}, arch, { rows: arch.rows.map(r => {
     const e = employees.find(p => p.id === r.empId);
-    return e ? Object.assign({}, r, { cognome: e.cognome, nome: e.nome, matricola: e.matricola || r.matricola || '' }) : r;
+    return e ? Object.assign({}, r, { cognome: e.cognome, nome: e.nome, matricola: matricolaOf(e) || r.matricola || '' }) : r;
   }) });
   const wb = buildCallsWorkbook(fresh);
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
@@ -5677,7 +5684,7 @@ function downloadCallsXlsx(arch) {
 function callsFresh(arch) {
   return Object.assign({}, arch, { rows: arch.rows.map(r => {
     const e = employees.find(p => p.id === r.empId);
-    return e ? Object.assign({}, r, { cognome: e.cognome, nome: e.nome, matricola: e.matricola || r.matricola || '' }) : r;
+    return e ? Object.assign({}, r, { cognome: e.cognome, nome: e.nome, matricola: matricolaOf(e) || r.matricola || '' }) : r;
   }) });
 }
 function buildCallsPdf(arch) {
@@ -7384,7 +7391,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '29 · 11/11/2026';
+const APP_VERSION = '30 · 11/11/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
