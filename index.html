@@ -5471,7 +5471,12 @@ function updateCallsDownloadPreview() {
   if (!from || !to || to < from) { box.textContent = 'Scegli le date: "Al" deve essere uguale o dopo "Dal".'; return; }
   const rows = callsInRange(from, to);
   box.innerHTML = `Il file si chiamerà <strong>"${callsFileName(from, to)}"</strong><br>
-    ${rows.length ? `${plural(rows.length, 'chiamata', 'chiamate')} · ${plural(new Set(rows.map(x => x.empId)).size, 'persona', 'persone')}` : '<span style="color:#c0392b">Nessuna chiamata in questi giorni.</span>'}`;
+    ${rows.length ? `${plural(rows.length, 'chiamata', 'chiamate')} · ${plural(new Set(rows.map(x => x.empId)).size, 'persona', 'persone')}` : '<span style="color:#c0392b">Nessuna chiamata in questi giorni.</span>'}` +
+    (() => {
+      const miss = [...new Map(rows.filter(r => !String(r.matricola || '').trim()).map(r => [r.empId, r])).values()];
+      return miss.length ? `<div style="margin-top:8px;color:#c0392b">⚠ <strong>${plural(miss.length, 'persona senza', 'persone senza')} matricola</strong>: ${miss.map(r => escapeHtml(r.cognome + ' ' + r.nome)).join(', ')}.<br>
+        <span style="color:#666">Importa il foglio presenze dell'ufficio paghe (Dipendenti → Importa Excel) o scrivila nella scheda della persona, poi scarica il file.</span></div>` : '';
+    })();
 }
 function confirmCallsDownload(fmt) {
   const from = document.getElementById('cd-from').value, to = document.getElementById('cd-to').value;
@@ -7379,7 +7384,7 @@ function warmupOcrFiles() {
     .forEach(u => fetch(u).catch(() => {}));
 }
 
-const APP_VERSION = '28 · 11/11/2026';
+const APP_VERSION = '29 · 11/11/2026';
 document.getElementById('app-version').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════════════
